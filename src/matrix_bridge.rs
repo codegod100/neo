@@ -1,52 +1,62 @@
-//! Async matrix-sdk bridge: background tokio runtime ↔ egui UI thread.
+//! Async matrix-sdk bridge: background tokio runtime ↔ Relm4/GTK UI thread.
 //!
-//! Mirrors sleek's `net.rs` shape (freeq-sdk ↔ egui bridge): the UI thread
-//! sends [`MatrixCmd`]s down an `mpsc` channel, this thread drives a
-//! `matrix-sdk` `Client` on a Tokio runtime and reports back [`MatrixEvent`]s.
-//! There is no long-running sync loop; the UI polls via `MatrixCmd::Poll` on
-//! a timer so the whole bridge fits in one straight-line async task with
-//! local `client` / `active_room` state instead of shared mutexes.
+//! Sync is push-based sliding sync (MSC4186), not classic `/sync` polling:
+//! [`matrix_sdk_ui::sync_service::SyncService`] drives the joined-room list
+//! (via `RoomListService`), a second hand-rolled [`matrix_sdk::sliding_sync`]
+//! instance drives Matrix Spaces (see the "spaces gotcha" note on
+//! [`spawn_space_sync`]), and each open room gets its own
+//! [`matrix_sdk_ui::timeline::Timeline`] subscription. All three keep running
+//! in the background for as long as the session is alive — there is no
+//! `MatrixCmd::Poll` and nothing in `run()`'s command loop blocks behind a
+//! long-poll, so `Send`/`OpenRoom`/`LoadOlder` never queue behind sync.
 //!
-//! SSO login is the one exception to "straight-line": it can sit waiting on
-//! the user finishing a browser flow for an arbitrarily long time, so it runs
-//! in its own spawned task and reports back over an internal channel instead
-//! of being `.await`ed inline — otherwise it would stall every other command
-//! (including `Poll` for an already-connected session) until the browser
-//! round-trip finished.
+//! The UI thread sends [`MatrixCmd`]s down an `mpsc` channel; this thread
+//! reports back [`MatrixEvent`]s. Every event is a full, already-flattened
+//! snapshot (`Vec<RoomSummary>`, `Vec<ChatMessage>`, ...) rebuilt from a
+//! diff-stream's local `eyeball_im::Vector` each time it changes — the UI
+//! side keeps its current clear+rebuild `FactoryVecDeque` pattern unchanged;
+//! incremental `VectorDiff` application into the widgets is a separate
+//! follow-up, not part of this migration.
+//!
+//! SSO login is the one command that can sit waiting on the user finishing a
+//! browser flow for an arbitrarily long time, so — like before — it runs in
+//! its own spawned task and reports back over an internal channel instead of
+//! being `.await`ed inline in the command loop.
 //!
 //! A successful login (when "remember me" is on) persists a [`MatrixSession`]
-//! to a single JSON file so the *next* launch can call `restore_session`
+//! to a single JSON file so the *next* launch can call `try_restore_session`
 //! instead of logging in again. This matters beyond convenience: every fresh
 //! login mints a brand-new device ID, and matrix-sdk's crypto store is bound
-//! to one device — reusing the same on-disk store across logins (as neo did
-//! before this existed) eventually throws `CryptoStoreError::MismatchedAccount`.
-//! `run()` tries a restore once at startup, before entering its command loop.
+//! to one device — reusing the same on-disk store across logins eventually
+//! throws `CryptoStoreError::MismatchedAccount`. `run()` tries a restore once
+//! at startup, before entering its command loop.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 
+use eyeball_im::Vector;
+use futures_util::{pin_mut, StreamExt};
 use matrix_sdk::authentication::matrix::MatrixSession;
-use matrix_sdk::config::SyncSettings;
 use matrix_sdk::deserialized_responses::SyncOrStrippedState;
 use matrix_sdk::media::{MediaFormat, MediaThumbnailSettings};
-use matrix_sdk::room::MessagesOptions;
-use matrix_sdk::ruma::events::room::message::MessageType;
+use matrix_sdk::ruma::api::client::sync::sync_events::v5::request::ListFilters;
+use matrix_sdk::ruma::directory::RoomTypeFilter;
+use matrix_sdk::ruma::events::room::message::{MessageType, RoomMessageEventContent};
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
-use matrix_sdk::ruma::events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncStateEvent};
-use matrix_sdk::ruma::{uint, OwnedRoomId, RoomId, UInt};
+use matrix_sdk::ruma::events::{StateEventType, SyncStateEvent};
+use matrix_sdk::ruma::{uint, RoomId};
+use matrix_sdk::sliding_sync::{SlidingSyncList, SlidingSyncMode, Version};
 use matrix_sdk::{Client, Room};
+use matrix_sdk_ui::sync_service::SyncService;
+use matrix_sdk_ui::timeline::{RoomExt, Timeline, TimelineItem};
+use matrix_sdk_ui::room_list_service::filters;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::state::{ChatMessage, RoomSummary};
-
-/// How many historical messages to pull per room per fetch.
-const MESSAGE_PAGE: u32 = 40;
-
-fn message_page_limit() -> UInt {
-    UInt::new(MESSAGE_PAGE as u64).unwrap_or_default()
-}
 
 /// Commands from the UI into the network thread.
 #[derive(Debug, Clone)]
@@ -59,11 +69,9 @@ pub enum MatrixCmd {
     /// URL to open (see [`MatrixEvent::SsoUrl`]) and waits for the browser
     /// redirect carrying the login token. `remember` — see [`MatrixCmd::Login`].
     LoginSso { homeserver: String, remember: bool },
-    /// Re-fetch the room list and (if any) the active room's latest messages.
-    Poll,
-    /// Switch the "watched" room — fetches its most recent messages.
+    /// Switch the "watched" room — (re)subscribes to its live timeline.
     OpenRoom(String),
-    /// Fetch older messages for `room_id`, prepending them.
+    /// Paginate the currently-open room's timeline backwards.
     LoadOlder(String),
     /// Send a plain-text message to `room_id`.
     Send { room_id: String, text: String },
@@ -80,11 +88,16 @@ pub enum MatrixEvent {
     SsoUrl(String),
     LoggedIn { user_id: String, homeserver: String },
     LoginFailed(String),
-    /// The joined-room list, plus which room IDs each joined space claims as
-    /// children (via `m.space.child` state, one level deep — nested
-    /// subspaces aren't flattened). Keyed by space room ID.
-    Rooms { rooms: Vec<RoomSummary>, space_children: HashMap<String, Vec<String>> },
-    Timeline { room_id: String, messages: Vec<ChatMessage>, prepend: bool },
+    /// The full joined-room list, re-flattened from the room-list service's
+    /// live `Vector<Room>` every time it changes.
+    Rooms(Vec<RoomSummary>),
+    /// Which room IDs each joined space claims as children (via
+    /// `m.space.child` state, one level deep — nested subspaces aren't
+    /// flattened). Keyed by space room ID. Updated independently of
+    /// [`MatrixEvent::Rooms`] by the hand-rolled spaces sync.
+    SpaceChildren(HashMap<String, Vec<String>>),
+    /// A full snapshot of the currently-open room's timeline, oldest first.
+    Timeline { room_id: String, messages: Vec<ChatMessage> },
     SendFailed { room_id: String, error: String },
     Error(String),
     LoggedOut,
@@ -114,25 +127,105 @@ pub fn spawn() -> (mpsc::UnboundedSender<MatrixCmd>, mpsc::UnboundedReceiver<Mat
 /// the main loop over the internal `sso_rx` channel.
 type SsoLoginResult = anyhow::Result<(Client, String, String)>;
 
+/// Everything spun up by [`start_sync`] for one logged-in session: the
+/// `SyncService` (drives the joined-room list), the hand-rolled spaces
+/// `SlidingSync` background task, and — once a room is opened — that room's
+/// live `Timeline` subscription. Bundled together so `Logout`/re-login can
+/// tear it all down in one place.
+struct ActiveSync {
+    service: Arc<SyncService>,
+    room_list_task: JoinHandle<()>,
+    space_sync_task: JoinHandle<()>,
+    active_room: Option<String>,
+    timeline_task: Option<JoinHandle<()>>,
+    active_timeline: Option<Arc<Timeline>>,
+}
+
+impl ActiveSync {
+    async fn stop(self) {
+        if let Some(task) = self.timeline_task {
+            task.abort();
+        }
+        self.room_list_task.abort();
+        self.space_sync_task.abort();
+        self.service.stop().await;
+    }
+
+    /// Switch the live timeline subscription to `room_id`, aborting whatever
+    /// was open before. Blocking here (rather than spawning the switch
+    /// itself) is deliberate: building+subscribing a `Timeline` is a bounded,
+    /// local-store-backed operation — nothing like the old 10s sync
+    /// long-poll it replaces — so a brief wait before the next command is
+    /// serviced is an acceptable trade for keeping this straightforward.
+    async fn switch_room(
+        &mut self,
+        client: &Client,
+        room_id: String,
+        evt_tx: mpsc::UnboundedSender<MatrixEvent>,
+    ) {
+        if let Some(task) = self.timeline_task.take() {
+            task.abort();
+        }
+        self.active_timeline = None;
+        self.active_room = Some(room_id.clone());
+
+        let Ok(rid) = RoomId::parse(&room_id) else { return };
+        let Some(room) = client.get_room(&rid) else { return };
+
+        let timeline = match room.timeline().await {
+            Ok(t) => Arc::new(t),
+            Err(err) => {
+                let _ = evt_tx.send(MatrixEvent::Error(format!("timeline: {err}")));
+                return;
+            }
+        };
+        let (initial, diff_stream) = timeline.subscribe().await;
+        self.active_timeline = Some(timeline);
+
+        self.timeline_task = Some(tokio::spawn(async move {
+            let mut items = initial;
+            let _ = evt_tx.send(MatrixEvent::Timeline {
+                room_id: room_id.clone(),
+                messages: flatten_chat_messages(&items),
+            });
+
+            pin_mut!(diff_stream);
+            while let Some(diffs) = diff_stream.next().await {
+                for diff in diffs {
+                    diff.apply(&mut items);
+                }
+                let _ = evt_tx.send(MatrixEvent::Timeline {
+                    room_id: room_id.clone(),
+                    messages: flatten_chat_messages(&items),
+                });
+            }
+        }));
+    }
+}
+
 async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::UnboundedSender<MatrixEvent>) {
     let mut client: Option<Client> = None;
-    let mut sync_token: Option<String> = None;
-    let mut active_room: Option<String> = None;
+    let mut sync: Option<ActiveSync> = None;
 
     // Try to pick up where the last "remember me" login left off, before
     // servicing any commands. Silent no-op if there's nothing remembered.
     if let Some((restored, user_id, hs)) = try_restore_session().await {
         let _ = evt_tx.send(MatrixEvent::Connecting);
-        // Report success as soon as the session is restored, not after the
-        // sync below — see the matching comment on the `Login` arm for why.
-        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
-        sync_token = initial_sync(&restored, &evt_tx).await;
-        client = Some(restored);
+        match start_sync(restored.clone(), evt_tx.clone()).await {
+            Ok(started) => {
+                sync = Some(started);
+                client = Some(restored);
+                let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
+            }
+            Err(err) => {
+                let _ = evt_tx.send(MatrixEvent::Error(format!("sync: {err}")));
+            }
+        }
     }
 
     // See the module doc: SSO logins run on a spawned task and report back
-    // here instead of being awaited inline, so this loop can keep servicing
-    // `Poll`/etc. while one is in flight.
+    // here instead of being awaited inline, so this loop keeps servicing
+    // other commands while one is in flight.
     let (sso_tx, mut sso_rx) = mpsc::unbounded_channel::<SsoLoginResult>();
 
     loop {
@@ -144,19 +237,19 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                         let _ = evt_tx.send(MatrixEvent::Connecting);
                         match login(&homeserver, &username, &password, remember).await {
                             Ok((new_client, user_id, hs)) => {
-                                // Authentication itself is done here — report
-                                // it right away instead of also waiting on
-                                // the initial sync below. That sync fetches
-                                // every joined room's summary (incl. a local
-                                // is_direct()/space-child lookup per room),
-                                // which on an account with a lot of rooms can
-                                // take noticeably longer than the login call
-                                // itself; the UI shows a "Loading rooms…"
-                                // state for that gap instead of leaving the
-                                // sign-in button stuck on "Signing in…".
-                                let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
-                                sync_token = initial_sync(&new_client, &evt_tx).await;
-                                client = Some(new_client);
+                                if let Some(prev) = sync.take() {
+                                    prev.stop().await;
+                                }
+                                match start_sync(new_client.clone(), evt_tx.clone()).await {
+                                    Ok(started) => {
+                                        sync = Some(started);
+                                        client = Some(new_client);
+                                        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
+                                    }
+                                    Err(err) => {
+                                        let _ = evt_tx.send(MatrixEvent::LoginFailed(err.to_string()));
+                                    }
+                                }
                             }
                             Err(err) => {
                                 let _ = evt_tx.send(MatrixEvent::LoginFailed(err.to_string()));
@@ -174,47 +267,51 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                         });
                     }
 
-                    MatrixCmd::Poll => {
-                        let Some(c) = client.as_ref() else { continue };
-                        match sync_step(c, sync_token.clone()).await {
-                            Ok(token) => sync_token = Some(token),
-                            Err(err) => {
-                                let _ = evt_tx.send(MatrixEvent::Error(format!("sync: {err}")));
-                                continue;
-                            }
-                        }
-                        send_room_list(c, &evt_tx).await;
-                        if let Some(room_id) = active_room.clone() {
-                            refresh_room(c, &room_id, &evt_tx, true).await;
-                        }
-                    }
-
                     MatrixCmd::OpenRoom(room_id) => {
-                        active_room = Some(room_id.clone());
-                        if let Some(c) = client.as_ref() {
-                            refresh_room(c, &room_id, &evt_tx, true).await;
+                        if let (Some(c), Some(active_sync)) = (client.as_ref(), sync.as_mut()) {
+                            active_sync.switch_room(c, room_id, evt_tx.clone()).await;
                         }
                     }
 
                     MatrixCmd::LoadOlder(room_id) => {
-                        if let Some(c) = client.as_ref() {
-                            load_older(c, &room_id, &evt_tx).await;
+                        if let Some(active_sync) = sync.as_ref() {
+                            if active_sync.active_room.as_deref() == Some(room_id.as_str()) {
+                                if let Some(timeline) = active_sync.active_timeline.clone() {
+                                    let evt_tx = evt_tx.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = timeline.paginate_backwards(40).await {
+                                            let _ = evt_tx.send(MatrixEvent::Error(format!("paginate: {e}")));
+                                        }
+                                    });
+                                }
+                            }
                         }
                     }
 
                     MatrixCmd::Send { room_id, text } => {
-                        let Some(c) = client.as_ref() else { continue };
-                        if let Err(err) = send_message(c, &room_id, &text).await {
-                            let _ = evt_tx.send(MatrixEvent::SendFailed { room_id, error: err.to_string() });
-                        } else if let Some(active) = active_room.clone() {
-                            refresh_room(c, &active, &evt_tx, true).await;
+                        if let Some(active_sync) = sync.as_ref() {
+                            if active_sync.active_room.as_deref() == Some(room_id.as_str()) {
+                                if let Some(timeline) = active_sync.active_timeline.clone() {
+                                    let evt_tx = evt_tx.clone();
+                                    tokio::spawn(async move {
+                                        let content = RoomMessageEventContent::text_plain(&text);
+                                        if let Err(e) = timeline.send(content.into()).await {
+                                            let _ = evt_tx.send(MatrixEvent::SendFailed {
+                                                room_id,
+                                                error: e.to_string(),
+                                            });
+                                        }
+                                    });
+                                }
+                            }
                         }
                     }
 
                     MatrixCmd::Logout => {
+                        if let Some(active_sync) = sync.take() {
+                            active_sync.stop().await;
+                        }
                         client = None;
-                        sync_token = None;
-                        active_room = None;
                         clear_saved_session();
                         let _ = evt_tx.send(MatrixEvent::LoggedOut);
                     }
@@ -224,10 +321,19 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
             Some(result) = sso_rx.recv() => {
                 match result {
                     Ok((new_client, user_id, hs)) => {
-                        // See the matching comment on the `Login` arm.
-                        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
-                        sync_token = initial_sync(&new_client, &evt_tx).await;
-                        client = Some(new_client);
+                        if let Some(prev) = sync.take() {
+                            prev.stop().await;
+                        }
+                        match start_sync(new_client.clone(), evt_tx.clone()).await {
+                            Ok(started) => {
+                                sync = Some(started);
+                                client = Some(new_client);
+                                let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
+                            }
+                            Err(err) => {
+                                let _ = evt_tx.send(MatrixEvent::LoginFailed(err.to_string()));
+                            }
+                        }
                     }
                     Err(err) => {
                         let _ = evt_tx.send(MatrixEvent::LoginFailed(err.to_string()));
@@ -235,6 +341,223 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                 }
             }
         }
+    }
+}
+
+/// Starts push-based sliding sync for a freshly-logged-in (or restored)
+/// `client`: the `SyncService` (joined-room list) plus the hand-rolled spaces
+/// sync, both as detached background tasks forwarding snapshots over
+/// `evt_tx`. Fails fast if the homeserver doesn't speak MSC4186 rather than
+/// silently hanging.
+async fn start_sync(client: Client, evt_tx: mpsc::UnboundedSender<MatrixEvent>) -> anyhow::Result<ActiveSync> {
+    let versions = client.available_sliding_sync_versions().await;
+    anyhow::ensure!(
+        versions.iter().any(|v| matches!(v, Version::Native)),
+        "homeserver does not support sliding sync (MSC4186)"
+    );
+
+    let service = SyncService::builder(client.clone()).build().await?;
+    service.start().await;
+    let service = Arc::new(service);
+
+    let room_list_task = spawn_room_list_task(service.clone(), evt_tx.clone());
+    let space_sync_task = spawn_space_sync(client.clone(), evt_tx.clone());
+
+    Ok(ActiveSync {
+        service,
+        room_list_task,
+        space_sync_task,
+        active_room: None,
+        timeline_task: None,
+        active_timeline: None,
+    })
+}
+
+/// Forwards `SyncService`'s room-list diff stream as flattened
+/// `MatrixEvent::Rooms` snapshots. Uses the "non-left" filter as the closest
+/// match to the old "all joined rooms" behavior — note `RoomListService`'s
+/// underlying list hard-codes `not_room_types: [Space]`, which is exactly why
+/// [`spawn_space_sync`] exists as a second, independent sync.
+fn spawn_room_list_task(service: Arc<SyncService>, evt_tx: mpsc::UnboundedSender<MatrixEvent>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let room_list = match service.room_list_service().all_rooms().await {
+            Ok(rl) => rl,
+            Err(err) => {
+                let _ = evt_tx.send(MatrixEvent::Error(format!("room list: {err}")));
+                return;
+            }
+        };
+        let (stream, controller) = room_list.entries_with_dynamic_adapters(500);
+        // The stream only starts yielding once a filter is set.
+        controller.set_filter(Box::new(filters::new_filter_non_left()));
+
+        pin_mut!(stream);
+        let mut rooms: Vector<Room> = Vector::new();
+        while let Some(diffs) = stream.next().await {
+            for diff in diffs {
+                diff.apply(&mut rooms);
+            }
+            let summaries = flatten_room_summaries(&rooms).await;
+            let _ = evt_tx.send(MatrixEvent::Rooms(summaries));
+        }
+    })
+}
+
+/// Matrix Spaces don't come through `RoomListService` (it hard-codes
+/// `not_room_types: [Space]` with no way to override it), so this drives a
+/// second, hand-rolled `SlidingSync` instance — filtered to
+/// `RoomTypeFilter::Space` — purely to make sure joined space rooms (and
+/// their `m.space.child` state) land in the local store. Once they do,
+/// `collect_space_children` reads them back out via the same
+/// `client.rooms()`/`space_child_room_ids` path the old classic-sync code
+/// used, so this task only needs to signal "state changed", not carry data
+/// itself.
+fn spawn_space_sync(client: Client, evt_tx: mpsc::UnboundedSender<MatrixEvent>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let sliding_sync = match build_space_sliding_sync(&client).await {
+            Ok(s) => s,
+            Err(err) => {
+                let _ = evt_tx.send(MatrixEvent::Error(format!("space sync: {err}")));
+                return;
+            }
+        };
+
+        let stream = sliding_sync.sync();
+        pin_mut!(stream);
+        while let Some(result) = stream.next().await {
+            if let Err(err) = result {
+                let _ = evt_tx.send(MatrixEvent::Error(format!("space sync: {err}")));
+                continue;
+            }
+            let space_children = collect_space_children(&client).await;
+            let _ = evt_tx.send(MatrixEvent::SpaceChildren(space_children));
+        }
+    })
+}
+
+async fn build_space_sliding_sync(client: &Client) -> anyhow::Result<matrix_sdk::sliding_sync::SlidingSync> {
+    // `ListFilters` is `#[non_exhaustive]`, so it can't be built with struct-literal
+    // syntax outside its crate — default it, then set the one field we need.
+    let mut filters = ListFilters::default();
+    filters.room_types = vec![RoomTypeFilter::Space];
+    let list = SlidingSyncList::builder("spaces")
+        .sync_mode(SlidingSyncMode::new_growing(50))
+        .timeline_limit(0u32)
+        .required_state(vec![
+            (StateEventType::RoomName, "".to_owned()),
+            (StateEventType::SpaceChild, "*".to_owned()),
+        ])
+        .filters(Some(filters));
+
+    let sliding_sync =
+        client.sliding_sync("neo-spaces")?.version(Version::Native).add_list(list).build().await?;
+    Ok(sliding_sync)
+}
+
+async fn collect_space_children(client: &Client) -> HashMap<String, Vec<String>> {
+    let mut space_children: HashMap<String, Vec<String>> = HashMap::new();
+    for room in client.rooms() {
+        if !room.is_space() {
+            continue;
+        }
+        let children = space_child_room_ids(&room).await;
+        if !children.is_empty() {
+            space_children.insert(room.room_id().to_string(), children);
+        }
+    }
+    space_children
+}
+
+async fn flatten_room_summaries(rooms: &Vector<Room>) -> Vec<RoomSummary> {
+    let mut out = Vec::with_capacity(rooms.len());
+    for room in rooms.iter() {
+        out.push(room_summary(room).await);
+    }
+    out.sort_by_key(|r| r.name.to_lowercase());
+    out
+}
+
+async fn room_summary(room: &Room) -> RoomSummary {
+    let name = room.name().unwrap_or_else(|| room.room_id().to_string());
+    let is_space = room.is_space();
+    // Only spaces need their avatar today (for the filter chips above the
+    // room list), so skip the download for every other room.
+    let avatar = if is_space { space_avatar(room).await } else { None };
+    RoomSummary {
+        id: room.room_id().to_string(),
+        name,
+        preview: String::new(),
+        encrypted: room.encryption_state().is_encrypted(),
+        direct: room.is_direct().await.unwrap_or(false),
+        is_space,
+        avatar,
+    }
+}
+
+/// Small thumbnail of a space's avatar, sized for the filter chip row.
+async fn space_avatar(room: &Room) -> Option<Vec<u8>> {
+    let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(64), uint!(64)));
+    room.avatar(format).await.ok().flatten()
+}
+
+/// Room IDs a joined space (`space`) advertises as children via `m.space.child`
+/// state events, read from local sync state (no server hierarchy query). An
+/// empty `via` list means the relationship was removed, so those are skipped;
+/// this only reflects what's already in `space`'s state, so children the user
+/// hasn't joined won't be discoverable this way — good enough for filtering
+/// the room list down to rooms already in `client.rooms()`.
+async fn space_child_room_ids(space: &Room) -> Vec<String> {
+    let Ok(events) = space.get_state_events_static::<SpaceChildEventContent>().await else {
+        return Vec::new();
+    };
+    events
+        .iter()
+        .filter_map(|raw| {
+            let SyncOrStrippedState::Sync(SyncStateEvent::Original(orig)) = raw.deserialize().ok()?
+            else {
+                return None;
+            };
+            if orig.content.via.is_empty() {
+                return None;
+            }
+            Some(orig.state_key.to_string())
+        })
+        .collect()
+}
+
+fn flatten_chat_messages(items: &Vector<Arc<TimelineItem>>) -> Vec<ChatMessage> {
+    items.iter().filter_map(|item| to_chat_message(item)).collect()
+}
+
+/// `None` for anything that isn't a rendered `m.room.message` (day dividers,
+/// read markers, redactions, reactions, unsupported msgtypes are skipped
+/// rather than shown as raw JSON) — same behavior as the old classic-sync
+/// `message_body`, just sourced from a `TimelineItem` instead of a raw event.
+fn to_chat_message(item: &TimelineItem) -> Option<ChatMessage> {
+    let event = item.as_event()?;
+    let msg = event.content().as_message()?;
+    Some(ChatMessage {
+        event_id: event.event_id().map(|id| id.to_string()),
+        sender: event.sender().to_string(),
+        body: message_body_text(msg.msgtype(), event.sender().localpart()),
+        ts_millis: event.timestamp().0.into(),
+        own: event.is_own(),
+        pending: event.is_local_echo()
+            && !matches!(event.send_state(), Some(matrix_sdk_ui::timeline::EventSendState::Sent { .. })),
+    })
+}
+
+fn message_body_text(msgtype: &MessageType, sender_localpart: &str) -> String {
+    match msgtype {
+        MessageType::Text(t) => t.body.clone(),
+        MessageType::Emote(t) => format!("* {sender_localpart} {}", t.body),
+        MessageType::Notice(t) => t.body.clone(),
+        MessageType::Image(t) => format!("🖼 {}", t.body),
+        MessageType::File(t) => format!("📎 {}", t.body),
+        MessageType::Audio(t) => format!("🔊 {}", t.body),
+        MessageType::Video(t) => format!("🎬 {}", t.body),
+        MessageType::Location(t) => format!("📍 {}", t.body),
+        _ => "[unsupported message]".to_owned(),
     }
 }
 
@@ -463,206 +786,4 @@ async fn try_restore_session() -> Option<(Client, String, String)> {
 
     let hs = client.homeserver().to_string();
     Some((client, user_id.to_string(), hs))
-}
-
-/// First sync after login — establishes the sync token and pushes the room list.
-async fn initial_sync(client: &Client, evt_tx: &mpsc::UnboundedSender<MatrixEvent>) -> Option<String> {
-    match sync_step(client, None).await {
-        Ok(token) => {
-            send_room_list(client, evt_tx).await;
-            Some(token)
-        }
-        Err(err) => {
-            let _ = evt_tx.send(MatrixEvent::Error(format!("initial sync: {err}")));
-            None
-        }
-    }
-}
-
-async fn sync_step(client: &Client, token: Option<String>) -> anyhow::Result<String> {
-    let mut settings = SyncSettings::default().timeout(std::time::Duration::from_secs(10));
-    if let Some(t) = token {
-        settings = settings.token(t);
-    }
-    let resp = client.sync_once(settings).await?;
-    Ok(resp.next_batch)
-}
-
-async fn send_room_list(client: &Client, evt_tx: &mpsc::UnboundedSender<MatrixEvent>) {
-    let joined_rooms = client.rooms();
-
-    let mut rooms: Vec<RoomSummary> = Vec::new();
-    for room in &joined_rooms {
-        rooms.push(room_summary(room).await);
-    }
-    rooms.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    let mut space_children: HashMap<String, Vec<String>> = HashMap::new();
-    for room in &joined_rooms {
-        if !room.is_space() {
-            continue;
-        }
-        let children = space_child_room_ids(room).await;
-        if !children.is_empty() {
-            space_children.insert(room.room_id().to_string(), children);
-        }
-    }
-
-    let _ = evt_tx.send(MatrixEvent::Rooms { rooms, space_children });
-}
-
-async fn room_summary(room: &Room) -> RoomSummary {
-    let name = room.name().unwrap_or_else(|| room.room_id().to_string());
-    let is_space = room.is_space();
-    // Only spaces need their avatar today (for the filter chips above the
-    // room list), so skip the download for every other room.
-    let avatar = if is_space { space_avatar(room).await } else { None };
-    RoomSummary {
-        id: room.room_id().to_string(),
-        name,
-        preview: String::new(),
-        encrypted: room.encryption_state().is_encrypted(),
-        direct: room.is_direct().await.unwrap_or(false),
-        is_space,
-        avatar,
-    }
-}
-
-/// Small thumbnail of a space's avatar, sized for the filter chip row.
-async fn space_avatar(room: &Room) -> Option<Vec<u8>> {
-    let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(64), uint!(64)));
-    room.avatar(format).await.ok().flatten()
-}
-
-/// Room IDs a joined space (`space`) advertises as children via `m.space.child`
-/// state events, read from local sync state (no server hierarchy query). An
-/// empty `via` list means the relationship was removed, so those are skipped;
-/// this only reflects what's already in `space`'s state, so children the user
-/// hasn't joined won't be discoverable this way — good enough for filtering
-/// the room list down to rooms already in `client.rooms()`.
-async fn space_child_room_ids(space: &Room) -> Vec<String> {
-    let Ok(events) = space.get_state_events_static::<SpaceChildEventContent>().await else {
-        return Vec::new();
-    };
-    events
-        .iter()
-        .filter_map(|raw| {
-            let SyncOrStrippedState::Sync(SyncStateEvent::Original(orig)) = raw.deserialize().ok()?
-            else {
-                return None;
-            };
-            if orig.content.via.is_empty() {
-                return None;
-            }
-            Some(orig.state_key.to_string())
-        })
-        .collect()
-}
-
-/// Fetch the most recent page of messages for `room_id` (fresh, not incremental).
-async fn refresh_room(
-    client: &Client,
-    room_id: &str,
-    evt_tx: &mpsc::UnboundedSender<MatrixEvent>,
-    replace: bool,
-) {
-    let Ok(rid) = RoomId::parse(room_id) else { return };
-    let Some(room) = client.get_room(&rid) else { return };
-
-    let mut options = MessagesOptions::backward();
-    options.limit = message_page_limit();
-    match room.messages(options).await {
-        Ok(page) => {
-            let own_id = client.user_id().map(|u| u.to_string());
-            let mut messages: Vec<ChatMessage> = page
-                .chunk
-                .iter()
-                .filter_map(|te| to_chat_message(te, own_id.as_deref()))
-                .collect();
-            messages.reverse(); // oldest first for display
-            let _ = evt_tx.send(MatrixEvent::Timeline {
-                room_id: room_id.to_owned(),
-                messages,
-                prepend: !replace,
-            });
-        }
-        Err(err) => {
-            let _ = evt_tx.send(MatrixEvent::Error(format!("messages: {err}")));
-        }
-    }
-}
-
-async fn load_older(client: &Client, room_id: &str, evt_tx: &mpsc::UnboundedSender<MatrixEvent>) {
-    let Ok(rid) = RoomId::parse(room_id) else { return };
-    let Some(room) = client.get_room(&rid) else { return };
-
-    let mut options = MessagesOptions::backward();
-    options.limit = message_page_limit();
-    match room.messages(options).await {
-        Ok(page) => {
-            let own_id = client.user_id().map(|u| u.to_string());
-            let mut messages: Vec<ChatMessage> = page
-                .chunk
-                .iter()
-                .filter_map(|te| to_chat_message(te, own_id.as_deref()))
-                .collect();
-            messages.reverse();
-            let _ = evt_tx.send(MatrixEvent::Timeline {
-                room_id: room_id.to_owned(),
-                messages,
-                prepend: true,
-            });
-        }
-        Err(err) => {
-            let _ = evt_tx.send(MatrixEvent::Error(format!("older messages: {err}")));
-        }
-    }
-}
-
-async fn send_message(client: &Client, room_id: &str, text: &str) -> anyhow::Result<()> {
-    let rid: OwnedRoomId = RoomId::parse(room_id)?.to_owned();
-    let room = client.get_room(&rid).ok_or_else(|| anyhow::anyhow!("room not joined"))?;
-    let content = matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(text);
-    room.send(content).await?;
-    Ok(())
-}
-
-fn to_chat_message(
-    te: &matrix_sdk::deserialized_responses::TimelineEvent,
-    own_id: Option<&str>,
-) -> Option<ChatMessage> {
-    let ev = te.raw().deserialize().ok()?;
-    let (sender, body, ts) = message_body(&ev)?;
-    Some(ChatMessage {
-        event_id: None,
-        own: own_id.is_some_and(|me| me == sender),
-        sender,
-        body,
-        ts_millis: ts,
-        pending: false,
-    })
-}
-
-/// Extract `(sender, readable body, origin_server_ts millis)` from a
-/// `m.room.message` event; `None` for anything else (state events, reactions,
-/// unsupported msgtypes are skipped rather than shown as raw JSON).
-fn message_body(ev: &AnySyncTimelineEvent) -> Option<(String, String, i64)> {
-    let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(msg)) = ev else {
-        return None;
-    };
-    let orig = msg.as_original()?;
-    let sender = orig.sender.to_string();
-    let ts: i64 = orig.origin_server_ts.0.into();
-    let body = match &orig.content.msgtype {
-        MessageType::Text(t) => t.body.clone(),
-        MessageType::Emote(t) => format!("* {} {}", orig.sender.localpart(), t.body),
-        MessageType::Notice(t) => t.body.clone(),
-        MessageType::Image(t) => format!("🖼 {}", t.body),
-        MessageType::File(t) => format!("📎 {}", t.body),
-        MessageType::Audio(t) => format!("🔊 {}", t.body),
-        MessageType::Video(t) => format!("🎬 {}", t.body),
-        MessageType::Location(t) => format!("📍 {}", t.body),
-        _ => "[unsupported message]".to_owned(),
-    };
-    Some((sender, body, ts))
 }

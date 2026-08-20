@@ -16,7 +16,10 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 dirs = "6.0.0"
 env_logger = "0.11.11"
 log = "0.4.33"
+eyeball-im = "0.7"
+futures-util = "0.3"
 matrix-sdk = { version = "0.13", default-features = false, features = ["sqlite", "rustls-tls", "e2e-encryption", "automatic-room-key-forwarding", "sso-login"] }
+matrix-sdk-ui = { version = "0.13.0", default-features = false, features = ["rustls-tls"] }
 open = "5.3.2"
 relm4 = { version = "0.11", default-features = false, features = ["macros", "libadwaita", "gnome_47"] }
 serde = { version = "1.0.229", features = ["derive"] }

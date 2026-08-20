@@ -545,21 +545,6 @@ impl SimpleComponent for AppModel {
             }
         });
 
-        // There's no server-push/long-poll loop in the bridge (see its module
-        // doc) — it syncs on demand, driven by this timer, same cadence for
-        // the room list and (if any) the open room's timeline.
-        let poll_tx = cmd_tx.clone();
-        relm4::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                interval.tick().await;
-                if poll_tx.send(MatrixCmd::Poll).is_err() {
-                    break;
-                }
-            }
-        });
-
         let room_factory = FactoryVecDeque::builder().launch_default().forward(
             sender.input_sender(),
             |out| match out {
@@ -747,23 +732,26 @@ impl AppModel {
                 self.sso_pending = false;
                 self.error = Some(err);
             }
-            MatrixEvent::Rooms { rooms, space_children } => {
+            MatrixEvent::Rooms(rooms) => {
+                self.rooms = rooms;
+                self.sync_room_list();
+                self.sync_space_chips();
+            }
+            MatrixEvent::SpaceChildren(space_children) => {
                 // A space the user switched into may have been left/removed
-                // server-side by the time this poll lands — fall back to
+                // server-side by the time this update lands — fall back to
                 // Home instead of showing an empty, unrecoverable list.
                 if let Some(active) = &self.active_space {
                     if !space_children.contains_key(active) {
                         self.active_space = None;
                     }
                 }
-                self.rooms = rooms;
                 self.space_children = space_children;
                 self.loading_rooms = false;
                 self.sync_room_list();
-                self.sync_space_chips();
             }
-            MatrixEvent::Timeline { room_id, messages, prepend } => {
-                self.apply_timeline(room_id, messages, prepend);
+            MatrixEvent::Timeline { room_id, messages } => {
+                self.apply_timeline(room_id, messages);
             }
             MatrixEvent::SendFailed { room_id: _, error } => {
                 self.toaster.add_toast(adw::Toast::new(&format!("Send failed: {error}")));
@@ -840,28 +828,16 @@ impl AppModel {
         self.active_room_summary().map(|r| r.name.clone()).unwrap_or_else(|| "Room".to_owned())
     }
 
-    fn apply_timeline(&mut self, room_id: String, mut incoming: Vec<ChatMessage>, prepend: bool) {
+    /// Every `MatrixEvent::Timeline` is a full, already-deduplicated snapshot
+    /// of the room's live timeline (the bridge re-flattens its
+    /// `eyeball_im::Vector` on every diff), so there's no merge/dedup logic
+    /// needed here anymore — just replace.
+    fn apply_timeline(&mut self, room_id: String, incoming: Vec<ChatMessage>) {
         self.loading_older = false;
-        let existing = self.messages.entry(room_id.clone()).or_default();
-        if prepend && !existing.is_empty() {
-            // Merge on (sender, ts, body) to avoid duplicate rows across
-            // successive fetches of the same recent window.
-            let known: std::collections::HashSet<(String, i64, String)> = existing
-                .iter()
-                .map(|m| (m.sender.clone(), m.ts_millis, m.body.clone()))
-                .collect();
-            incoming.retain(|m| !known.contains(&(m.sender.clone(), m.ts_millis, m.body.clone())));
-            let mut merged = incoming;
-            merged.extend(existing.drain(..));
-            *existing = merged;
-        } else {
-            *existing = incoming;
-        }
+        self.messages.insert(room_id.clone(), incoming);
 
         if self.active_room.as_deref() == Some(room_id.as_str()) {
-            if !prepend {
-                self.loading_messages = false;
-            }
+            self.loading_messages = false;
             self.sync_messages();
         }
     }
