@@ -26,12 +26,25 @@ impl FactoryComponent for MessageRow {
             set_spacing: 2,
             set_halign: if self.msg.own { gtk::Align::End } else { gtk::Align::Start },
 
-            gtk::Label {
-                set_visible: !self.msg.own,
-                set_label: &self.msg.sender,
-                add_css_class: "caption-heading",
-                add_css_class: "accent",
-                set_halign: gtk::Align::Start,
+            gtk::Box {
+                set_orientation: gtk::Orientation::Horizontal,
+                set_spacing: 6,
+                set_halign: if self.msg.own { gtk::Align::End } else { gtk::Align::Start },
+
+                gtk::Label {
+                    set_visible: !self.msg.own,
+                    set_label: &self.msg.sender,
+                    add_css_class: "caption-heading",
+                    add_css_class: "accent",
+                    set_halign: gtk::Align::Start,
+                },
+
+                gtk::Label {
+                    set_label: &format_timestamp(self.msg.ts_millis),
+                    add_css_class: "caption",
+                    add_css_class: "dim-label",
+                    set_halign: gtk::Align::Start,
+                },
             },
 
             gtk::Box {
@@ -62,4 +75,12 @@ impl FactoryComponent for MessageRow {
     fn init_model(msg: Self::Init, _index: &relm4::factory::DynamicIndex, _sender: FactorySender<Self>) -> Self {
         Self { msg }
     }
+}
+
+/// Render a `origin_server_ts` (millis since the Unix epoch) as a short
+/// local time, e.g. `"2:32 PM"`.
+fn format_timestamp(ts_millis: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ts_millis)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%-I:%M %p").to_string())
+        .unwrap_or_default()
 }
