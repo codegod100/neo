@@ -4,7 +4,9 @@
 //! shape closely) and bridges [`crate::matrix_bridge`]'s `mpsc` channel into
 //! Relm4's message loop.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use adw::prelude::*;
 use relm4::abstractions::Toaster;
@@ -50,12 +52,26 @@ pub struct AppModel {
     loading_rooms: bool,
     active_room: Option<String>,
     messages: HashMap<String, Vec<ChatMessage>>,
+    /// True while a `LoadOlder` pagination request is in flight, so the
+    /// scroll-position handler below doesn't fire another one on every
+    /// intermediate scroll event while we're already waiting on one.
     loading_older: bool,
     /// True from opening a room until its first timeline fetch lands, so the
     /// room screen can show a spinner instead of a blank scroller — replaces
     /// the (already-cached) messages for a room you've visited before, no
     /// spinner needed then.
     loading_messages: bool,
+    /// The message scroller's vertical adjustment, stashed here (set once,
+    /// right after `init` builds the widgets) so `apply_timeline` can read
+    /// its current position before a "load older" rebuild — see
+    /// `restore_scroll_anchor`.
+    message_vadj: Option<gtk::Adjustment>,
+    /// Set just before a "load older" rebuild to `Some((old_upper,
+    /// old_value))`; the scroller's `connect_changed` handler (wired up in
+    /// `init`) consumes it to shift `value` by exactly how much taller the
+    /// content got, so prepending history keeps the same messages in view
+    /// instead of snapping the scroller to the bottom or to a stale offset.
+    restore_scroll_anchor: Rc<Cell<Option<(f64, f64)>>>,
 
     // --- Spaces ---
     space_children: HashMap<String, Vec<String>>,
@@ -91,6 +107,8 @@ pub enum AppMsg {
     // Room screen
     Back,
     Send,
+    /// Auto-triggered by the message scroller nearing the top of the loaded
+    /// history — see the `connect_value_changed` handler wired up in `init`.
     LoadOlder,
 
     // Settings screen
@@ -402,12 +420,6 @@ impl SimpleComponent for AppModel {
                                     set_halign: gtk::Align::Start,
                                     set_ellipsize: gtk::pango::EllipsizeMode::End,
                                 },
-                                gtk::Button {
-                                    set_label: "Load older",
-                                    #[watch]
-                                    set_sensitive: !model.loading_older,
-                                    connect_clicked => AppMsg::LoadOlder,
-                                },
                             },
 
                             gtk::Stack {
@@ -559,7 +571,7 @@ impl SimpleComponent for AppModel {
         );
         let message_factory = FactoryVecDeque::builder().launch_default().detach();
 
-        let model = AppModel {
+        let mut model = AppModel {
             cmd_tx,
             screen: Screen::Connect,
             dark: true,
@@ -581,6 +593,8 @@ impl SimpleComponent for AppModel {
             messages: HashMap::new(),
             loading_older: false,
             loading_messages: false,
+            message_vadj: None,
+            restore_scroll_anchor: Rc::new(Cell::new(None)),
             space_children: HashMap::new(),
             active_space: None,
             has_spaces: false,
@@ -599,11 +613,39 @@ impl SimpleComponent for AppModel {
         let widgets = view_output!();
 
         // Keep the timeline pinned to the newest message as it grows, same
-        // as the old egui `ScrollArea::stick_to_bottom`.
+        // as the old egui `ScrollArea::stick_to_bottom` — but only while the
+        // user hasn't scrolled away from the bottom (`sticky_bottom`), and
+        // preserving position rather than snapping when older history gets
+        // prepended above the current view (`restore_scroll_anchor`).
+        //
+        // Also replaces the old manual "Load older" button: nearing the top
+        // asks the bridge for more history on its own, Element/Discord-style.
         let vadj = widgets.message_scroller.vadjustment();
-        vadj.connect_changed(move |adj| {
-            adj.set_value(adj.upper() - adj.page_size());
-        });
+        model.message_vadj = Some(vadj.clone());
+
+        const LOAD_OLDER_THRESHOLD: f64 = 200.0;
+        let sticky_bottom = Rc::new(Cell::new(true));
+
+        {
+            let sticky_bottom = sticky_bottom.clone();
+            let sender = sender.clone();
+            vadj.connect_value_changed(move |adj| {
+                sticky_bottom.set(adj.value() + adj.page_size() >= adj.upper() - 1.0);
+                if adj.value() <= LOAD_OLDER_THRESHOLD {
+                    sender.input(AppMsg::LoadOlder);
+                }
+            });
+        }
+        {
+            let restore_scroll_anchor = model.restore_scroll_anchor.clone();
+            vadj.connect_changed(move |adj| {
+                if let Some((old_upper, old_value)) = restore_scroll_anchor.take() {
+                    adj.set_value(old_value + (adj.upper() - old_upper));
+                } else if sticky_bottom.get() {
+                    adj.set_value(adj.upper() - adj.page_size());
+                }
+            });
+        }
 
         ComponentParts { model, widgets }
     }
@@ -674,9 +716,15 @@ impl SimpleComponent for AppModel {
                 }
             }
             AppMsg::LoadOlder => {
-                if let Some(room_id) = self.active_room.clone() {
-                    self.loading_older = true;
-                    let _ = self.cmd_tx.send(MatrixCmd::LoadOlder(room_id));
+                // Guards against the scroller re-firing this on every
+                // intermediate scroll event while still near the top and a
+                // request is already in flight — the manual button used to
+                // get this for free from `set_sensitive: !loading_older`.
+                if !self.loading_older {
+                    if let Some(room_id) = self.active_room.clone() {
+                        self.loading_older = true;
+                        let _ = self.cmd_tx.send(MatrixCmd::LoadOlder(room_id));
+                    }
                 }
             }
 
@@ -833,11 +881,20 @@ impl AppModel {
     /// `eyeball_im::Vector` on every diff), so there's no merge/dedup logic
     /// needed here anymore — just replace.
     fn apply_timeline(&mut self, room_id: String, incoming: Vec<ChatMessage>) {
+        let was_loading_older = self.loading_older;
         self.loading_older = false;
         self.messages.insert(room_id.clone(), incoming);
 
         if self.active_room.as_deref() == Some(room_id.as_str()) {
             self.loading_messages = false;
+            // See `restore_scroll_anchor`'s doc comment: snapshot the
+            // scroller's current position now, before `sync_messages`
+            // rebuilds the list with older history prepended.
+            if was_loading_older {
+                if let Some(vadj) = &self.message_vadj {
+                    self.restore_scroll_anchor.set(Some((vadj.upper(), vadj.value())));
+                }
+            }
             self.sync_messages();
         }
     }
