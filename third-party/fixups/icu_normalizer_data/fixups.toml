@@ -1,0 +1,12 @@
+# src/lib.rs does `include!("../data/mod.rs")`, pulling in every
+# data/*.rs.data file as inline Rust source - reindeer's default srcs
+# detection only walks `src/`, so the generated target is missing all of
+# these and buck2's rustc action fails with "couldn't read .../data/mod.rs".
+extra_srcs = ["data/**"]
+
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+buildscript.run = true

@@ -1,0 +1,12 @@
+# Same story as icu_normalizer_data/fixups.toml - src/lib.rs does
+# `include!("../data/mod.rs")`, pulling in every data/*.rs.data file as
+# inline Rust source outside `src/`, which reindeer's default srcs
+# detection doesn't pick up.
+extra_srcs = ["data/**"]
+
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+buildscript.run = true

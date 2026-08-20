@@ -86,6 +86,52 @@ state (no server hierarchy query), one level deep: sub-spaces aren't flattened i
 their parent's chip, and children the space admin hasn't invited/added locally won't
 show until they do.
 
+## Building with buck2
+
+Besides `cargo`, the whole crate graph — neo's own code plus every transitive
+dependency (relm4, the gtk4-rs bindings, matrix-sdk, and everything under
+those) — also builds with [buck2](https://buck2.build/), following the same
+approach as [arelm](https://github.com/codegod100/arelm):
+
+```sh
+buck2 build //:neo   # or: buck2 run //:neo
+```
+
+`Cargo.toml`/`Cargo.lock` remain the dependency-resolution source of truth;
+[reindeer](https://github.com/facebookincubator/reindeer) reads them and
+generates real buck2 `rust_library` targets into `third-party/BUCK`. If you
+change dependencies, regenerate with:
+
+```sh
+reindeer --manifest-path "$(pwd)/Cargo.toml" vendor
+reindeer --manifest-path "$(pwd)/Cargo.toml" buckify
+```
+
+(the `--manifest-path` flag is required as an absolute path — this reindeer
+build doesn't honor `reindeer.toml`'s relative `manifest_path` setting.)
+
+A few non-obvious things `third-party/fixups/*/fixups.toml` handles for you,
+worth knowing if buckify/build starts failing after a dependency bump:
+
+- **`buildscript.run` is opt-in per crate.** reindeer does not run a
+  dependency's `build.rs` unless its fixup explicitly sets
+  `buildscript.run = true` (or `[buildscript.run]` with `rustc_link_lib`/
+  `rustc_link_search`/`env` sub-keys) — omitting it silently skips the build
+  script rather than erroring, which usually surfaces later as a missing
+  `OUT_DIR` env var or undefined linker symbols.
+- **`extra_srcs` for non-`mod`-reachable includes.** Several crates use
+  `include!`/`include_str!`/`include_bytes!` on files not reachable via a
+  `mod` declaration (doc pages, `.der`/data files, even a crate's own
+  `Cargo.toml` when a proc-macro like ruma's reads it at compile time via
+  `proc_macro_crate::crate_name`) — reindeer's default srcs walk misses
+  these, so they need an explicit `extra_srcs` glob.
+- **Toolchain tool paths must be absolute.** `toolchains/BUCK` inlines
+  `system_demo_toolchains()` with the `cxx` toolchain's `compiler`/
+  `cxx_compiler`/`archiver` set to absolute paths, because build scripts that
+  shell out to a C compiler (ring, libsqlite3-sys, blake3) run through a
+  wrapper that resolves `$CC`/`$CXX`/`$AR` via `os.execl`, which — unlike
+  buck2's own native compile/link actions — does not search `$PATH`.
+
 ## Known limitations
 
 - Polling, not live sync — new messages appear up to ~3s late.

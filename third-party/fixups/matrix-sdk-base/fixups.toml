@@ -1,0 +1,11 @@
+# src/lib.rs does `#[doc = include_str!("../README.md")]` - reindeer's default
+# srcs detection only follows `mod` declarations across .rs files, so this
+# crate-root file never gets picked up.
+#
+# Cargo.toml itself is also needed: ruma-macros' `#[derive(EventContent)]`
+# (and the StringEnum-family derives) use `proc_macro_crate::crate_name` to
+# figure out whether to emit `::ruma_common`/`::ruma_events` or `::ruma::...`
+# paths, which reads CARGO_MANIFEST_DIR/Cargo.toml directly - not included in
+# srcs by default. matrix-sdk-base depends on `ruma` (not `ruma-common`/
+# `ruma-events` directly), same as matrix-sdk-common/matrix-sdk-crypto.
+extra_srcs = ["README.md", "Cargo.toml"]

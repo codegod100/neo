@@ -1,0 +1,4 @@
+# src/attrs.rs does `include_dir!("$CARGO_MANIFEST_DIR/doc/js/")` (via the
+# `include_dir` proc macro) to embed mermaid.js at compile time - reindeer's
+# default srcs detection only follows `mod` declarations across .rs files.
+extra_srcs = ["doc/js/**"]

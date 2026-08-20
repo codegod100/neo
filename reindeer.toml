@@ -1,0 +1,33 @@
+##
+## Reindeer config for neo's Cargo.toml.
+##
+## Vendors + buckifies Cargo.lock's transitive dependency graph (relm4/gtk4-rs
+## on one side, matrix-sdk on the other) into third-party/BUCK as native
+## rust_library targets, replacing `cargo build`/`cargo run` with a real buck2
+## target (see root BUCK) for the desktop dev flow.
+##
+## Re-run `reindeer vendor` (if Cargo.lock changed) then `reindeer buckify`
+## after any Cargo.toml/Cargo.lock edit - third-party/BUCK is generated, not
+## hand-maintained.
+third_party_dir = "third-party"
+
+# Cargo.toml lives at the repo root (next to this file), not inside
+# third_party_dir - without this, reindeer defaults manifest_path to
+# `third_party_dir/Cargo.toml` and fails with "third-party/Cargo.toml is not
+# a file".
+manifest_path = "Cargo.toml"
+
+# Several -sys crates here (glib-sys, gtk4-sys, libadwaita-sys, cairo-sys-rs,
+# pango-sys, gdk-pixbuf-sys, ring, libsqlite3-sys, ...) build.rs's use
+# `env!("CARGO_PKG_*")`-style compile-time access; buck2's generated rules
+# don't set those by default.
+cargo_env = true
+
+# Host desktop platform only - links against the system's own GTK4 +
+# libadwaita via pkg-config (see .cargo/config.toml's PKG_CONFIG_PATH, root
+# BUCK's GTK4_LIB_DIRS). Matches what `cargo build`/`cargo run` did before.
+[platform.linux-x86_64]
+target = "x86_64-unknown-linux-gnu"
+
+[buck]
+file_name = "BUCK"

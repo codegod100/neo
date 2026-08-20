@@ -1,0 +1,4 @@
+# src/lib.rs does `include_str!("raw_data")` and `include!("lookup")` -
+# extensionless data files reindeer's default srcs detection (which only
+# follows `mod` declarations across .rs files) doesn't pick up.
+extra_srcs = ["src/raw_data", "src/lookup"]

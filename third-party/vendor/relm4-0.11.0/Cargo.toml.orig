@@ -1,0 +1,133 @@
+[package]
+name = "relm4"
+documentation = "https://docs.rs/relm4/"
+
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+license.workspace = true
+description.workspace = true
+
+homepage.workspace = true
+repository.workspace = true
+
+keywords.workspace = true
+categories.workspace = true
+
+include = [
+    "src/",
+    "examples/",
+    "benches/",
+    "tests/",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustc-args = ["--cfg", "docsrs"]
+cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
+# enable unstable features in the documentation
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["css", "macros", "gnome_42"]
+css = ["relm4-css"]
+libadwaita = ["adw"]
+libpanel = ["panel"]
+macros = ["relm4-macros"]
+gnome_50 = ["gnome_49", "gtk/gnome_50", "adw/v1_9"]
+gnome_49 = ["gnome_48", "gtk/gnome_49", "adw/v1_8"]
+gnome_48 = ["gnome_47", "gtk/gnome_48", "adw/v1_7"]
+gnome_47 = ["gnome_46", "gtk/gnome_47", "adw/v1_6"]
+gnome_46 = ["gnome_45", "gtk/gnome_46", "adw/v1_5"]
+gnome_45 = ["gnome_44", "gtk/gnome_45", "adw/v1_4"]
+gnome_44 = ["gnome_43", "gtk/gnome_44", "adw/v1_3"]
+gnome_43 = ["gnome_42", "gtk/gnome_43", "adw/v1_2"]
+gnome_42 = ["gtk/gnome_42"]
+
+# All features except docs. This is also used in the CI
+all = ["macros", "libadwaita", "panel", "panel/v1_4"]
+
+[dependencies]
+adw = { workspace = true, optional = true }
+flume.workspace = true
+futures.workspace = true
+fragile.workspace = true
+gtk.workspace = true
+once_cell.workspace = true
+panel = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync"] }
+
+relm4-css = { workspace = true, optional = true }
+relm4-macros = { workspace = true, optional = true }
+tracing.workspace = true
+
+[dev-dependencies]
+relm4-macros.workspace = true
+
+# For the benchmarks
+criterion = { workspace = true, default-features = false }
+
+# For the examples
+# relm4-components.workspace = true
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
+rand.workspace = true
+tracker.workspace = true
+reqwest.workspace = true
+tracing-subscriber.workspace = true
+serde = { workspace = true, features = ["derive", "default"] }
+serde_json.workspace = true
+
+[[bench]]
+name = "stress_test"
+harness = false
+
+# Make sure that the examples are scraped
+[[example]]
+name = "simple"
+path = "examples/simple.rs"
+doc-scrape-examples = true
+
+[[example]]
+name = "leaflet_sidebar"
+path = "examples/leaflet_sidebar.rs"
+required-features = ["libadwaita"]
+
+[[example]]
+name = "tab_factory"
+path = "examples/tab_factory.rs"
+required-features = ["libadwaita"]
+
+[[example]]
+name = "tab_game"
+path = "examples/tab_game.rs"
+required-features = ["libadwaita"]
+
+[[example]]
+name = "toast"
+path = "examples/toast.rs"
+required-features = ["libadwaita", "gnome_43"]
+
+[[example]]
+name = "split_layout"
+path = "examples/split_layout.rs"
+required-features = ["libadwaita", "gnome_45"]
+
+[[example]]
+name = "navigation_splitview_with_stack"
+path = "examples/navigation_splitview_with_stack.rs"
+required-features = ["libadwaita", "gnome_45"]
+
+[[example]]
+name = "message_from_grid_view"
+path = "examples/message_from_grid_view.rs"
+required-features = ["gtk/v4_12"]

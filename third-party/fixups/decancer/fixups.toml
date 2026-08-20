@@ -1,0 +1,12 @@
+# src/lib.rs does `include_str!("../README.md")`, and src/codepoints.rs /
+# src/bidi/mod.rs pull in precompiled lookup tables from ../bin/*.bin -
+# reindeer's default srcs detection only follows `mod` declarations across
+# .rs files.
+extra_srcs = ["README.md", "bin/**"]
+
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+buildscript.run = true
