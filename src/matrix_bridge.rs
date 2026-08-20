@@ -122,9 +122,11 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
     // servicing any commands. Silent no-op if there's nothing remembered.
     if let Some((restored, user_id, hs)) = try_restore_session().await {
         let _ = evt_tx.send(MatrixEvent::Connecting);
+        // Report success as soon as the session is restored, not after the
+        // sync below — see the matching comment on the `Login` arm for why.
+        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
         sync_token = initial_sync(&restored, &evt_tx).await;
         client = Some(restored);
-        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
     }
 
     // See the module doc: SSO logins run on a spawned task and report back
@@ -141,9 +143,19 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                         let _ = evt_tx.send(MatrixEvent::Connecting);
                         match login(&homeserver, &username, &password, remember).await {
                             Ok((new_client, user_id, hs)) => {
+                                // Authentication itself is done here — report
+                                // it right away instead of also waiting on
+                                // the initial sync below. That sync fetches
+                                // every joined room's summary (incl. a local
+                                // is_direct()/space-child lookup per room),
+                                // which on an account with a lot of rooms can
+                                // take noticeably longer than the login call
+                                // itself; the UI shows a "Loading rooms…"
+                                // state for that gap instead of leaving the
+                                // sign-in button stuck on "Signing in…".
+                                let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
                                 sync_token = initial_sync(&new_client, &evt_tx).await;
                                 client = Some(new_client);
-                                let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
                             }
                             Err(err) => {
                                 let _ = evt_tx.send(MatrixEvent::LoginFailed(err.to_string()));
@@ -211,9 +223,10 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
             Some(result) = sso_rx.recv() => {
                 match result {
                     Ok((new_client, user_id, hs)) => {
+                        // See the matching comment on the `Login` arm.
+                        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
                         sync_token = initial_sync(&new_client, &evt_tx).await;
                         client = Some(new_client);
-                        let _ = evt_tx.send(MatrixEvent::LoggedIn { user_id, homeserver: hs });
                     }
                     Err(err) => {
                         let _ = evt_tx.send(MatrixEvent::LoginFailed(err.to_string()));

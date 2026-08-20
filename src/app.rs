@@ -35,14 +35,27 @@ pub struct AppModel {
     homeserver: Option<String>,
     error: Option<String>,
     sso_url: Option<String>,
+    /// Which of the two sign-in buttons is the one currently connecting —
+    /// otherwise both would show "Signing in…" for whichever one fired.
+    sso_pending: bool,
 
     // --- Rooms ---
     rooms: Vec<RoomSummary>,
     room_filter_buf: gtk::EntryBuffer,
     rooms_empty_hint: Option<String>,
+    /// True from a successful login until the first room list lands, so the
+    /// rooms screen (which now appears right after authentication succeeds,
+    /// before that first sync finishes) shows "Loading rooms…" instead of
+    /// the misleading "No rooms yet" empty state.
+    loading_rooms: bool,
     active_room: Option<String>,
     messages: HashMap<String, Vec<ChatMessage>>,
     loading_older: bool,
+    /// True from opening a room until its first timeline fetch lands, so the
+    /// room screen can show a spinner instead of a blank scroller — replaces
+    /// the (already-cached) messages for a room you've visited before, no
+    /// spinner needed then.
+    loading_messages: bool,
 
     // --- Spaces ---
     space_children: HashMap<String, Vec<String>>,
@@ -242,7 +255,9 @@ impl SimpleComponent for AppModel {
                                         add_css_class: "suggested-action",
                                         add_css_class: "pill",
                                         #[watch]
-                                        set_label: if model.connection == ConnectionState::Connecting {
+                                        set_label: if model.connection == ConnectionState::Connecting
+                                            && !model.sso_pending
+                                        {
                                             "Signing in…"
                                         } else {
                                             "Sign in"
@@ -261,7 +276,9 @@ impl SimpleComponent for AppModel {
                                     gtk::Button {
                                         add_css_class: "pill",
                                         #[watch]
-                                        set_label: if model.connection == ConnectionState::Connecting {
+                                        set_label: if model.connection == ConnectionState::Connecting
+                                            && model.sso_pending
+                                        {
                                             "Signing in…"
                                         } else {
                                             "Sign in with SSO"
@@ -311,7 +328,12 @@ impl SimpleComponent for AppModel {
                                 #[watch]
                                 set_visible: model.has_spaces,
                                 set_vscrollbar_policy: gtk::PolicyType::Never,
-                                set_hscrollbar_policy: gtk::PolicyType::Automatic,
+                                // GTK4's overlay scrollbar draws over the
+                                // chips instead of reserving its own space —
+                                // fine for a tall message list, not for a
+                                // thin pill row. Hidden here; the row still
+                                // scrolls fine with wheel/trackpad.
+                                set_hscrollbar_policy: gtk::PolicyType::Never,
 
                                 #[local_ref]
                                 space_chip_box -> gtk::Box {
@@ -377,18 +399,40 @@ impl SimpleComponent for AppModel {
                                 },
                             },
 
-                            #[name = "message_scroller"]
-                            gtk::ScrolledWindow {
+                            gtk::Stack {
                                 set_vexpand: true,
+                                set_transition_type: gtk::StackTransitionType::Crossfade,
 
-                                #[local_ref]
-                                message_box -> gtk::Box {
+                                add_named[Some("loading")] = &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-                                    set_spacing: 6,
-                                    set_valign: gtk::Align::End,
-                                    set_margin_top: 8,
-                                    set_margin_bottom: 8,
+                                    set_spacing: 12,
+                                    set_valign: gtk::Align::Center,
+                                    set_halign: gtk::Align::Center,
+
+                                    gtk::Spinner { set_spinning: true },
+                                    gtk::Label {
+                                        set_label: "Loading messages…",
+                                        add_css_class: "dim-label",
+                                    },
                                 },
+
+                                #[name = "message_scroller"]
+                                add_named[Some("messages")] = &gtk::ScrolledWindow {
+                                    #[local_ref]
+                                    message_box -> gtk::Box {
+                                        set_orientation: gtk::Orientation::Vertical,
+                                        set_spacing: 6,
+                                        set_valign: gtk::Align::End,
+                                        set_margin_top: 8,
+                                        set_margin_bottom: 8,
+                                    },
+                                },
+
+                                // Set only after both named pages above exist
+                                // — see the matching comment on the outer
+                                // screen Stack.
+                                #[watch]
+                                set_visible_child_name: if model.loading_messages { "loading" } else { "messages" },
                             },
 
                             gtk::Box {
@@ -532,12 +576,15 @@ impl SimpleComponent for AppModel {
             homeserver: None,
             error: None,
             sso_url: None,
+            sso_pending: false,
             rooms: Vec::new(),
             room_filter_buf: gtk::EntryBuffer::default(),
             rooms_empty_hint: Some("No rooms yet — joined rooms show up here.".to_owned()),
+            loading_rooms: false,
             active_room: None,
             messages: HashMap::new(),
             loading_older: false,
+            loading_messages: false,
             space_children: HashMap::new(),
             active_space: None,
             has_spaces: false,
@@ -570,6 +617,7 @@ impl SimpleComponent for AppModel {
             AppMsg::Login => {
                 self.connection = ConnectionState::Connecting;
                 self.error = None;
+                self.sso_pending = false;
                 let _ = self.cmd_tx.send(MatrixCmd::Login {
                     homeserver: self.homeserver_buf.text().trim().to_owned(),
                     username: self.username_buf.text().trim().to_owned(),
@@ -581,6 +629,7 @@ impl SimpleComponent for AppModel {
                 self.connection = ConnectionState::Connecting;
                 self.error = None;
                 self.sso_url = None;
+                self.sso_pending = true;
                 let _ = self.cmd_tx.send(MatrixCmd::LoginSso {
                     homeserver: self.homeserver_buf.text().trim().to_owned(),
                     remember: self.remember_me,
@@ -598,6 +647,7 @@ impl SimpleComponent for AppModel {
                 // waiting.
                 self.connection = ConnectionState::Disconnected;
                 self.sso_url = None;
+                self.sso_pending = false;
             }
             AppMsg::ToggleRemember(v) => self.remember_me = v,
 
@@ -610,6 +660,8 @@ impl SimpleComponent for AppModel {
             AppMsg::OpenRoom(id) => {
                 self.active_room = Some(id.clone());
                 self.screen = Screen::Room;
+                let has_cache = self.messages.get(&id).is_some_and(|m| !m.is_empty());
+                self.loading_messages = !has_cache;
                 self.sync_messages();
                 let _ = self.cmd_tx.send(MatrixCmd::OpenRoom(id));
             }
@@ -667,13 +719,21 @@ impl AppModel {
                 self.homeserver = Some(homeserver);
                 self.error = None;
                 self.sso_url = None;
+                self.sso_pending = false;
                 self.screen = Screen::Rooms;
                 self.password_buf.set_text("");
+                // The room list hasn't loaded yet at this point (the bridge
+                // reports LoggedIn as soon as auth succeeds, before its
+                // first sync) — show "Loading rooms…" instead of the
+                // steady-state "No rooms yet" empty hint for that gap.
+                self.loading_rooms = true;
+                self.rooms_empty_hint = Some("Loading rooms…".to_owned());
                 self.toaster.add_toast(adw::Toast::new("Signed in"));
             }
             MatrixEvent::LoginFailed(err) => {
                 self.connection = ConnectionState::Disconnected;
                 self.sso_url = None;
+                self.sso_pending = false;
                 self.error = Some(err);
             }
             MatrixEvent::Rooms { rooms, space_children } => {
@@ -687,6 +747,7 @@ impl AppModel {
                 }
                 self.rooms = rooms;
                 self.space_children = space_children;
+                self.loading_rooms = false;
                 self.sync_room_list();
                 self.sync_space_chips();
             }
@@ -720,6 +781,10 @@ impl AppModel {
         let rooms: Vec<RoomSummary> = self.filtered_rooms().into_iter().cloned().collect();
         self.rooms_empty_hint = if !rooms.is_empty() {
             None
+        } else if self.loading_rooms {
+            // First room list hasn't landed yet — don't let a stray call
+            // here (e.g. the filter box) flash "No rooms yet" before it does.
+            Some("Loading rooms…".to_owned())
         } else if self.rooms.iter().any(|r| !r.is_space) {
             Some("No rooms match your search.".to_owned())
         } else {
@@ -781,6 +846,9 @@ impl AppModel {
         }
 
         if self.active_room.as_deref() == Some(room_id.as_str()) {
+            if !prepend {
+                self.loading_messages = false;
+            }
             self.sync_messages();
         }
     }
@@ -800,8 +868,10 @@ impl AppModel {
         self.homeserver = None;
         self.sso_url = None;
         self.rooms.clear();
+        self.loading_rooms = false;
         self.active_room = None;
         self.messages.clear();
+        self.loading_messages = false;
         self.space_children.clear();
         self.active_space = None;
         self.screen = Screen::Connect;
