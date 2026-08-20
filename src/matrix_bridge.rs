@@ -152,11 +152,25 @@ impl ActiveSync {
     }
 
     /// Switch the live timeline subscription to `room_id`, aborting whatever
-    /// was open before. Blocking here (rather than spawning the switch
-    /// itself) is deliberate: building+subscribing a `Timeline` is a bounded,
-    /// local-store-backed operation — nothing like the old 10s sync
-    /// long-poll it replaces — so a brief wait before the next command is
-    /// serviced is an acceptable trade for keeping this straightforward.
+    /// was open before.
+    ///
+    /// The room-list's own sliding-sync list caps every room at
+    /// `timeline_limit(1)` (just enough for previews) — see the module doc —
+    /// so before building the `Timeline` we bump this room's subscription via
+    /// `RoomListService::subscribe_to_rooms`, which raises its limit to 20
+    /// server-side. That's a plain sliding-sync request (updates the existing
+    /// stream's subscription, not a new connection), and it's fire-and-forget
+    /// here: it doesn't block on a resync completing. The resulting events
+    /// land in the local event cache and flow into the timeline through the
+    /// diff stream below like any other update, so this fixes the *next*
+    /// couple of sync responses rather than this call itself — no synchronous
+    /// network wait is added to opening a room.
+    ///
+    /// Blocking here (rather than spawning the switch itself) is deliberate:
+    /// building+subscribing a `Timeline` is a bounded, local-store-backed
+    /// operation — nothing like the old 10s sync long-poll it replaces — so a
+    /// brief wait before the next command is serviced is an acceptable trade
+    /// for keeping this straightforward.
     async fn switch_room(
         &mut self,
         client: &Client,
@@ -171,6 +185,8 @@ impl ActiveSync {
 
         let Ok(rid) = RoomId::parse(&room_id) else { return };
         let Some(room) = client.get_room(&rid) else { return };
+
+        self.service.room_list_service().subscribe_to_rooms(&[&rid]).await;
 
         let timeline = match room.timeline().await {
             Ok(t) => Arc::new(t),
