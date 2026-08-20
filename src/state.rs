@@ -10,6 +10,7 @@ pub enum Screen {
     Rooms,
     Room,
     Settings,
+    Lobby,
 }
 
 impl Screen {
@@ -20,6 +21,7 @@ impl Screen {
             Screen::Rooms => "rooms",
             Screen::Room => "room",
             Screen::Settings => "settings",
+            Screen::Lobby => "lobby",
         }
     }
 }
@@ -56,6 +58,18 @@ pub struct RoomSummary {
     /// fetched for spaces today (see `matrix_bridge::room_summary`), so the
     /// space filter chips can show an image instead of just initials.
     pub avatar: Option<Vec<u8>>,
+}
+
+/// One room in a space's Lobby directory — every room the space advertises
+/// via `m.space.child`, whether or not the user has joined it yet. Fetched
+/// from the homeserver's `/hierarchy` endpoint (unlike the joined-only
+/// channel list, which only reflects locally-cached state), so unjoined
+/// rooms are discoverable and joinable here.
+#[derive(Debug, Clone)]
+pub struct LobbyRoom {
+    pub id: String,
+    pub name: String,
+    pub joined: bool,
 }
 
 /// One rendered chat line.

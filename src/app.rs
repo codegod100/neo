@@ -11,11 +11,12 @@ use relm4::abstractions::Toaster;
 use relm4::factory::FactoryVecDeque;
 use relm4::prelude::*;
 
+use crate::factory::lobby_row::{LobbyRoomRow, LobbyRoomRowOutput};
 use crate::factory::message_row::MessageRow;
 use crate::factory::room_row::{RoomRow, RoomRowOutput};
 use crate::factory::space_chip::{SpaceChip, SpaceChipOutput};
 use crate::matrix_bridge::{self, MatrixCmd, MatrixEvent};
-use crate::state::{ChatMessage, ConnectionState, RoomSummary, Screen};
+use crate::state::{ChatMessage, ConnectionState, LobbyRoom, RoomSummary, Screen};
 
 pub struct AppModel {
     cmd_tx: tokio::sync::mpsc::UnboundedSender<MatrixCmd>,
@@ -62,6 +63,11 @@ pub struct AppModel {
     active_space: Option<String>,
     has_spaces: bool,
 
+    // --- Lobby (a space's full room directory, joined + not) ---
+    lobby_space: Option<String>,
+    lobby_rooms: Vec<LobbyRoom>,
+    loading_lobby: bool,
+
     // --- Compose ---
     compose_buf: gtk::EntryBuffer,
 
@@ -69,6 +75,7 @@ pub struct AppModel {
     room_factory: FactoryVecDeque<RoomRow>,
     message_factory: FactoryVecDeque<MessageRow>,
     space_factory: FactoryVecDeque<SpaceChip>,
+    lobby_factory: FactoryVecDeque<LobbyRoomRow>,
 
     toaster: Toaster,
 }
@@ -87,6 +94,11 @@ pub enum AppMsg {
     SelectSpace(Option<String>),
     OpenRoom(String),
     OpenSettings,
+    OpenLobby,
+
+    // Lobby screen
+    LobbyOpenRoom(String),
+    LobbyJoinRoom(String),
 
     // Room screen
     Back,
@@ -359,6 +371,18 @@ impl SimpleComponent for AppModel {
                                     connect_changed => AppMsg::FilterChanged,
                                 },
 
+                                // Directory of every room the active space
+                                // advertises (joined or not) — in addition to
+                                // the joined channels listed below.
+                                gtk::Button {
+                                    set_label: "Lobby",
+                                    add_css_class: "flat",
+                                    set_halign: gtk::Align::Start,
+                                    #[watch]
+                                    set_visible: model.active_space.is_some(),
+                                    connect_clicked => AppMsg::OpenLobby,
+                                },
+
                                 gtk::ScrolledWindow {
                                     set_vexpand: true,
 
@@ -378,6 +402,71 @@ impl SimpleComponent for AppModel {
                                     add_css_class: "dim-label",
                                     set_margin_top: 24,
                                 },
+                            },
+                        },
+
+                        add_named[Some("lobby")] = &gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            set_margin_all: 12,
+
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Button {
+                                    set_icon_name: "go-previous-symbolic",
+                                    connect_clicked => AppMsg::Back,
+                                },
+                                gtk::Label {
+                                    set_label: "Lobby",
+                                    add_css_class: "title-3",
+                                    set_hexpand: true,
+                                    set_halign: gtk::Align::Start,
+                                },
+                            },
+
+                            gtk::Stack {
+                                set_vexpand: true,
+                                set_transition_type: gtk::StackTransitionType::Crossfade,
+
+                                add_named[Some("loading")] = &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    set_spacing: 12,
+                                    set_valign: gtk::Align::Center,
+                                    set_halign: gtk::Align::Center,
+
+                                    gtk::Spinner { set_spinning: true },
+                                    gtk::Label {
+                                        set_label: "Loading directory…",
+                                        add_css_class: "dim-label",
+                                    },
+                                },
+
+                                add_named[Some("rooms")] = &gtk::ScrolledWindow {
+                                    set_vexpand: true,
+
+                                    #[local_ref]
+                                    lobby_list_box -> gtk::ListBox {
+                                        add_css_class: "boxed-list",
+                                        set_selection_mode: gtk::SelectionMode::None,
+                                        set_valign: gtk::Align::Start,
+                                    },
+                                },
+
+                                // Set only after both named pages above exist
+                                // — see the matching comment on the outer
+                                // screen Stack.
+                                #[watch]
+                                set_visible_child_name: if model.loading_lobby { "loading" } else { "rooms" },
+                            },
+
+                            gtk::Label {
+                                #[watch]
+                                set_visible: !model.loading_lobby && model.lobby_rooms.is_empty(),
+                                set_label: "No rooms in this space's directory.",
+                                add_css_class: "dim-label",
+                                set_margin_top: 24,
                             },
                         },
 
@@ -557,6 +646,13 @@ impl SimpleComponent for AppModel {
                 SpaceChipOutput::Select(id) => AppMsg::SelectSpace(id),
             },
         );
+        let lobby_factory = FactoryVecDeque::builder().launch_default().forward(
+            sender.input_sender(),
+            |out| match out {
+                LobbyRoomRowOutput::Open(id) => AppMsg::LobbyOpenRoom(id),
+                LobbyRoomRowOutput::Join(id) => AppMsg::LobbyJoinRoom(id),
+            },
+        );
         let message_factory = FactoryVecDeque::builder().launch_default().detach();
 
         let model = AppModel {
@@ -584,10 +680,14 @@ impl SimpleComponent for AppModel {
             space_children: HashMap::new(),
             active_space: None,
             has_spaces: false,
+            lobby_space: None,
+            lobby_rooms: Vec::new(),
+            loading_lobby: false,
             compose_buf: gtk::EntryBuffer::default(),
             room_factory,
             message_factory,
             space_factory,
+            lobby_factory,
             toaster: Toaster::default(),
         };
 
@@ -595,6 +695,7 @@ impl SimpleComponent for AppModel {
         let room_list_box = model.room_factory.widget();
         let message_box = model.message_factory.widget();
         let space_chip_box = model.space_factory.widget();
+        let lobby_list_box = model.lobby_factory.widget();
 
         let widgets = view_output!();
 
@@ -653,15 +754,25 @@ impl SimpleComponent for AppModel {
                 self.sync_room_list();
                 self.sync_space_chips();
             }
-            AppMsg::OpenRoom(id) => {
-                self.active_room = Some(id.clone());
-                self.screen = Screen::Room;
-                let has_cache = self.messages.get(&id).is_some_and(|m| !m.is_empty());
-                self.loading_messages = !has_cache;
-                self.sync_messages();
-                let _ = self.cmd_tx.send(MatrixCmd::OpenRoom(id));
-            }
+            AppMsg::OpenRoom(id) => self.open_room(id),
             AppMsg::OpenSettings => self.screen = Screen::Settings,
+            AppMsg::OpenLobby => {
+                if let Some(space_id) = self.active_space.clone() {
+                    self.lobby_space = Some(space_id.clone());
+                    self.lobby_rooms.clear();
+                    self.loading_lobby = true;
+                    self.sync_lobby_rows();
+                    self.screen = Screen::Lobby;
+                    let _ = self.cmd_tx.send(MatrixCmd::OpenLobby(space_id));
+                }
+            }
+
+            AppMsg::LobbyOpenRoom(id) => self.open_room(id),
+            AppMsg::LobbyJoinRoom(id) => {
+                if let Some(space_id) = self.lobby_space.clone() {
+                    let _ = self.cmd_tx.send(MatrixCmd::JoinRoom { room_id: id, space_id });
+                }
+            }
 
             AppMsg::Back => self.screen = Screen::Rooms,
             AppMsg::Send => {
@@ -756,6 +867,16 @@ impl AppModel {
             MatrixEvent::SendFailed { room_id: _, error } => {
                 self.toaster.add_toast(adw::Toast::new(&format!("Send failed: {error}")));
             }
+            MatrixEvent::SpaceHierarchy { space_id, rooms } => {
+                // A stale response for a lobby the user has since navigated
+                // away from — ignore it rather than repopulating the wrong
+                // screen's list.
+                if self.lobby_space.as_deref() == Some(space_id.as_str()) {
+                    self.lobby_rooms = rooms;
+                    self.loading_lobby = false;
+                    self.sync_lobby_rows();
+                }
+            }
             MatrixEvent::Error(err) => {
                 self.toaster.add_toast(adw::Toast::new(&err));
             }
@@ -819,6 +940,26 @@ impl AppModel {
         }
     }
 
+    /// Switches to the Room screen and (re)subscribes to `id`'s live
+    /// timeline. Shared by the normal joined-channel list and the Lobby
+    /// directory's "already joined" rows.
+    fn open_room(&mut self, id: String) {
+        self.active_room = Some(id.clone());
+        self.screen = Screen::Room;
+        let has_cache = self.messages.get(&id).is_some_and(|m| !m.is_empty());
+        self.loading_messages = !has_cache;
+        self.sync_messages();
+        let _ = self.cmd_tx.send(MatrixCmd::OpenRoom(id));
+    }
+
+    fn sync_lobby_rows(&mut self) {
+        let mut guard = self.lobby_factory.guard();
+        guard.clear();
+        for room in self.lobby_rooms.clone() {
+            guard.push_back(room);
+        }
+    }
+
     fn active_room_summary(&self) -> Option<&RoomSummary> {
         let id = self.active_room.as_ref()?;
         self.rooms.iter().find(|r| &r.id == id)
@@ -863,9 +1004,13 @@ impl AppModel {
         self.loading_messages = false;
         self.space_children.clear();
         self.active_space = None;
+        self.lobby_space = None;
+        self.lobby_rooms.clear();
+        self.loading_lobby = false;
         self.screen = Screen::Connect;
         self.sync_room_list();
         self.sync_space_chips();
+        self.sync_lobby_rows();
         self.sync_messages();
     }
 }

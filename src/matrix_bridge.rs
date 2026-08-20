@@ -41,6 +41,7 @@ use futures_util::{pin_mut, StreamExt};
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::deserialized_responses::SyncOrStrippedState;
 use matrix_sdk::media::{MediaFormat, MediaThumbnailSettings};
+use matrix_sdk::ruma::api::client::space::get_hierarchy;
 use matrix_sdk::ruma::api::client::sync::sync_events::v5::request::ListFilters;
 use matrix_sdk::ruma::directory::RoomTypeFilter;
 use matrix_sdk::ruma::events::room::message::{MessageType, RoomMessageEventContent};
@@ -48,7 +49,7 @@ use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::{StateEventType, SyncStateEvent};
 use matrix_sdk::ruma::{uint, RoomId};
 use matrix_sdk::sliding_sync::{SlidingSyncList, SlidingSyncMode, Version};
-use matrix_sdk::{Client, Room};
+use matrix_sdk::{Client, Room, RoomState};
 use matrix_sdk_ui::sync_service::SyncService;
 use matrix_sdk_ui::timeline::{RoomExt, Timeline, TimelineItem};
 use matrix_sdk_ui::room_list_service::filters;
@@ -56,7 +57,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::state::{ChatMessage, RoomSummary};
+use crate::state::{ChatMessage, LobbyRoom, RoomSummary};
 
 /// Commands from the UI into the network thread.
 #[derive(Debug, Clone)]
@@ -75,6 +76,12 @@ pub enum MatrixCmd {
     LoadOlder(String),
     /// Send a plain-text message to `room_id`.
     Send { room_id: String, text: String },
+    /// Fetch a space's full room directory (joined + not-yet-joined) via the
+    /// server's `/hierarchy` endpoint, for that space's "Lobby" screen.
+    OpenLobby(String),
+    /// Join a room surfaced in a space's Lobby directory, then re-fetch that
+    /// space's hierarchy so the row flips to "joined".
+    JoinRoom { room_id: String, space_id: String },
     /// Drop the session.
     Logout,
 }
@@ -99,6 +106,9 @@ pub enum MatrixEvent {
     /// A full snapshot of the currently-open room's timeline, oldest first.
     Timeline { room_id: String, messages: Vec<ChatMessage> },
     SendFailed { room_id: String, error: String },
+    /// A space's full room directory, fetched via `/hierarchy` for its
+    /// "Lobby" screen — `rooms` excludes the space's own row.
+    SpaceHierarchy { space_id: String, rooms: Vec<LobbyRoom> },
     Error(String),
     LoggedOut,
 }
@@ -307,6 +317,47 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                         }
                     }
 
+                    MatrixCmd::OpenLobby(space_id) => {
+                        if let Some(c) = client.clone() {
+                            let evt_tx = evt_tx.clone();
+                            tokio::spawn(async move {
+                                match fetch_hierarchy(&c, &space_id).await {
+                                    Ok(rooms) => {
+                                        let _ = evt_tx.send(MatrixEvent::SpaceHierarchy { space_id, rooms });
+                                    }
+                                    Err(err) => {
+                                        let _ = evt_tx.send(MatrixEvent::Error(format!("lobby: {err}")));
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    MatrixCmd::JoinRoom { room_id, space_id } => {
+                        if let Some(c) = client.clone() {
+                            let evt_tx = evt_tx.clone();
+                            tokio::spawn(async move {
+                                let Ok(rid) = RoomId::parse(&room_id) else { return };
+                                if let Err(err) = c.join_room_by_id(&rid).await {
+                                    let _ = evt_tx.send(MatrixEvent::Error(format!("join room: {err}")));
+                                    return;
+                                }
+                                // Refresh the directory so the row this join
+                                // came from flips to "joined" immediately,
+                                // rather than waiting on the next room-list
+                                // sync to notice.
+                                match fetch_hierarchy(&c, &space_id).await {
+                                    Ok(rooms) => {
+                                        let _ = evt_tx.send(MatrixEvent::SpaceHierarchy { space_id, rooms });
+                                    }
+                                    Err(err) => {
+                                        let _ = evt_tx.send(MatrixEvent::Error(format!("lobby: {err}")));
+                                    }
+                                }
+                            });
+                        }
+                    }
+
                     MatrixCmd::Logout => {
                         if let Some(active_sync) = sync.take() {
                             active_sync.stop().await;
@@ -466,6 +517,43 @@ async fn collect_space_children(client: &Client) -> HashMap<String, Vec<String>>
         }
     }
     space_children
+}
+
+/// Every room a space advertises via the server's `/hierarchy` endpoint —
+/// joined and not — for that space's "Lobby" directory screen. Unlike
+/// `space_child_room_ids` (which only reads locally-cached `m.space.child`
+/// state for rooms already joined), this hits the server, so rooms the user
+/// hasn't joined yet are discoverable too. Paginates until the server stops
+/// returning a `next_batch` token, capped at a generous number of pages so a
+/// huge space can't loop forever.
+async fn fetch_hierarchy(client: &Client, space_id: &str) -> anyhow::Result<Vec<LobbyRoom>> {
+    let root = RoomId::parse(space_id)?;
+    let mut rooms = Vec::new();
+    let mut from = None;
+    for _ in 0..20 {
+        let mut request = get_hierarchy::v1::Request::new(root.clone());
+        request.from = from.clone();
+        request.limit = Some(uint!(50));
+        let response = client.send(request).await?;
+        for chunk in response.rooms {
+            if chunk.room_id == root {
+                continue; // the space's own row — not a channel to list
+            }
+            let joined =
+                client.get_room(&chunk.room_id).is_some_and(|r| r.state() == RoomState::Joined);
+            rooms.push(LobbyRoom {
+                id: chunk.room_id.to_string(),
+                name: chunk.name.unwrap_or_else(|| chunk.room_id.to_string()),
+                joined,
+            });
+        }
+        from = response.next_batch;
+        if from.is_none() {
+            break;
+        }
+    }
+    rooms.sort_by_key(|r| r.name.to_lowercase());
+    Ok(rooms)
 }
 
 async fn flatten_room_summaries(rooms: &Vector<Room>) -> Vec<RoomSummary> {
@@ -786,4 +874,113 @@ async fn try_restore_session() -> Option<(Client, String, String)> {
 
     let hs = client.homeserver().to_string();
     Some((client, user_id.to_string(), hs))
+}
+
+/// Integration tests for the Lobby directory (`/hierarchy`) round-trip.
+///
+/// These drive a real `matrix_sdk::Client` against a `wiremock`-mocked
+/// homeserver, so they exercise the actual HTTP request/response and ruma
+/// (de)serialization — not just `fetch_hierarchy`'s in-memory logic. The
+/// crate currently ships as a bin-only target with no `[lib]`, so there's
+/// nothing for a `tests/` directory to link against; this lives next to the
+/// code it covers instead.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matrix_sdk::test_utils::logged_in_client_with_server;
+    use serde_json::json;
+    use wiremock::matchers::{method, path_regex, query_param, query_param_is_missing};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn room_chunk(room_id: &str, name: &str) -> serde_json::Value {
+        json!({
+            "room_id": room_id,
+            "name": name,
+            "num_joined_members": 3,
+            "world_readable": false,
+            "guest_can_join": false,
+            "children_state": [],
+        })
+    }
+
+    /// Mounts a single-page `/hierarchy` response containing the space's own
+    /// row (which `fetch_hierarchy` must filter out) plus the given children.
+    async fn mock_hierarchy(server: &MockServer, space_id: &str, children: &[(&str, &str)]) {
+        let mut rooms = vec![room_chunk(space_id, "The Space Itself")];
+        rooms.extend(children.iter().map(|(id, name)| room_chunk(id, name)));
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"rooms/[^/]+/hierarchy$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "rooms": rooms })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn fetch_hierarchy_excludes_the_space_itself_and_sorts_by_name() {
+        let (client, server) = logged_in_client_with_server().await;
+        let space_id = "!space:example.org";
+        mock_hierarchy(
+            &server,
+            space_id,
+            &[("!b:example.org", "Zebras"), ("!a:example.org", "Anteaters")],
+        )
+        .await;
+
+        let rooms = fetch_hierarchy(&client, space_id).await.unwrap();
+
+        let names: Vec<&str> = rooms.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["Anteaters", "Zebras"], "space's own row must be excluded");
+        assert!(rooms.iter().all(|r| !r.joined), "nothing joined yet");
+    }
+
+    #[tokio::test]
+    async fn fetch_hierarchy_paginates_until_next_batch_is_absent() {
+        let (client, server) = logged_in_client_with_server().await;
+        let space_id = "!space:example.org";
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"rooms/[^/]+/hierarchy$"))
+            .and(query_param_is_missing("from"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "next_batch": "page2",
+                "rooms": [room_chunk("!a:example.org", "Anteaters")],
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"rooms/[^/]+/hierarchy$"))
+            .and(query_param("from", "page2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "rooms": [room_chunk("!b:example.org", "Zebras")],
+            })))
+            .mount(&server)
+            .await;
+
+        let rooms = fetch_hierarchy(&client, space_id).await.unwrap();
+
+        let names: Vec<&str> = rooms.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["Anteaters", "Zebras"], "both pages must be aggregated");
+    }
+
+    #[tokio::test]
+    async fn fetch_hierarchy_reflects_a_locally_joined_room() {
+        let (client, server) = logged_in_client_with_server().await;
+        let space_id = "!space:example.org";
+        let room_id = "!a:example.org";
+        mock_hierarchy(&server, space_id, &[(room_id, "Anteaters")]).await;
+
+        let before = fetch_hierarchy(&client, space_id).await.unwrap();
+        assert!(!before[0].joined, "not joined until we actually join");
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"rooms/[^/]+/join$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "room_id": room_id })))
+            .mount(&server)
+            .await;
+        client.join_room_by_id(&RoomId::parse(room_id).unwrap()).await.unwrap();
+
+        let after = fetch_hierarchy(&client, space_id).await.unwrap();
+        assert!(after[0].joined, "fetch_hierarchy should see the local join immediately");
+    }
 }
