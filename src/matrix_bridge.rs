@@ -29,11 +29,12 @@ use std::thread;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::SyncSettings;
 use matrix_sdk::deserialized_responses::SyncOrStrippedState;
+use matrix_sdk::media::{MediaFormat, MediaThumbnailSettings};
 use matrix_sdk::room::MessagesOptions;
 use matrix_sdk::ruma::events::room::message::MessageType;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncStateEvent};
-use matrix_sdk::ruma::{OwnedRoomId, RoomId, UInt};
+use matrix_sdk::ruma::{uint, OwnedRoomId, RoomId, UInt};
 use matrix_sdk::{Client, Room};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -499,14 +500,25 @@ async fn send_room_list(client: &Client, evt_tx: &mpsc::UnboundedSender<MatrixEv
 
 async fn room_summary(room: &Room) -> RoomSummary {
     let name = room.name().unwrap_or_else(|| room.room_id().to_string());
+    let is_space = room.is_space();
+    // Only spaces need their avatar today (for the filter chips above the
+    // room list), so skip the download for every other room.
+    let avatar = if is_space { space_avatar(room).await } else { None };
     RoomSummary {
         id: room.room_id().to_string(),
         name,
         preview: String::new(),
         encrypted: room.encryption_state().is_encrypted(),
         direct: room.is_direct().await.unwrap_or(false),
-        is_space: room.is_space(),
+        is_space,
+        avatar,
     }
+}
+
+/// Small thumbnail of a space's avatar, sized for the filter chip row.
+async fn space_avatar(room: &Room) -> Option<Vec<u8>> {
+    let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(64), uint!(64)));
+    room.avatar(format).await.ok().flatten()
 }
 
 /// Room IDs a joined space (`space`) advertises as children via `m.space.child`
