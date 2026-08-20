@@ -301,72 +301,83 @@ impl SimpleComponent for AppModel {
                         },
 
                         add_named[Some("rooms")] = &gtk::Box {
-                            set_orientation: gtk::Orientation::Vertical,
-                            set_spacing: 8,
-                            set_margin_all: 12,
+                            set_orientation: gtk::Orientation::Horizontal,
 
-                            gtk::Box {
-                                set_orientation: gtk::Orientation::Horizontal,
-                                set_spacing: 8,
-
-                                gtk::Label {
-                                    #[watch]
-                                    set_label: model.user_id.as_deref().unwrap_or(""),
-                                    add_css_class: "dim-label",
-                                    set_hexpand: true,
-                                    set_halign: gtk::Align::Start,
-                                    set_ellipsize: gtk::pango::EllipsizeMode::Middle,
-                                },
-                                gtk::Button {
-                                    set_icon_name: "emblem-system-symbolic",
-                                    set_tooltip_text: Some("Settings"),
-                                    connect_clicked => AppMsg::OpenSettings,
-                                },
-                            },
-
+                            // Space rail: fixed-width, scrolls vertically —
+                            // its footprint never grows with the number or
+                            // length of the user's spaces, so it can't force
+                            // the window wider than a phone screen.
                             gtk::ScrolledWindow {
                                 #[watch]
                                 set_visible: model.has_spaces,
-                                set_vscrollbar_policy: gtk::PolicyType::Never,
-                                // GTK4's overlay scrollbar draws over the
-                                // chips instead of reserving its own space —
-                                // fine for a tall message list, not for a
-                                // thin pill row. Hidden here; the row still
-                                // scrolls fine with wheel/trackpad.
                                 set_hscrollbar_policy: gtk::PolicyType::Never,
+                                // GTK4's overlay scrollbar draws over the
+                                // rail instead of reserving its own space —
+                                // fine for a tall message list, not for a
+                                // narrow avatar column. Hidden here; the
+                                // rail still scrolls fine with wheel/trackpad.
+                                set_vscrollbar_policy: gtk::PolicyType::Never,
+                                set_width_request: 64,
 
                                 #[local_ref]
                                 space_chip_box -> gtk::Box {
-                                    set_orientation: gtk::Orientation::Horizontal,
+                                    set_orientation: gtk::Orientation::Vertical,
                                     set_spacing: 6,
+                                    set_margin_all: 8,
                                 },
                             },
 
-                            gtk::Entry {
-                                set_buffer: &model.room_filter_buf,
-                                set_placeholder_text: Some("Search rooms…"),
-                                set_primary_icon_name: Some("system-search-symbolic"),
-                                connect_changed => AppMsg::FilterChanged,
-                            },
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_spacing: 8,
+                                set_margin_all: 12,
+                                set_hexpand: true,
 
-                            gtk::ScrolledWindow {
-                                set_vexpand: true,
+                                gtk::Box {
+                                    set_orientation: gtk::Orientation::Horizontal,
+                                    set_spacing: 8,
 
-                                #[local_ref]
-                                room_list_box -> gtk::ListBox {
-                                    add_css_class: "boxed-list",
-                                    set_selection_mode: gtk::SelectionMode::None,
-                                    set_valign: gtk::Align::Start,
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: model.user_id.as_deref().unwrap_or(""),
+                                        add_css_class: "dim-label",
+                                        set_hexpand: true,
+                                        set_halign: gtk::Align::Start,
+                                        set_ellipsize: gtk::pango::EllipsizeMode::Middle,
+                                    },
+                                    gtk::Button {
+                                        set_icon_name: "emblem-system-symbolic",
+                                        set_tooltip_text: Some("Settings"),
+                                        connect_clicked => AppMsg::OpenSettings,
+                                    },
                                 },
-                            },
 
-                            gtk::Label {
-                                #[watch]
-                                set_visible: model.rooms_empty_hint.is_some(),
-                                #[watch]
-                                set_label: model.rooms_empty_hint.as_deref().unwrap_or(""),
-                                add_css_class: "dim-label",
-                                set_margin_top: 24,
+                                gtk::Entry {
+                                    set_buffer: &model.room_filter_buf,
+                                    set_placeholder_text: Some("Search rooms…"),
+                                    set_primary_icon_name: Some("system-search-symbolic"),
+                                    connect_changed => AppMsg::FilterChanged,
+                                },
+
+                                gtk::ScrolledWindow {
+                                    set_vexpand: true,
+
+                                    #[local_ref]
+                                    room_list_box -> gtk::ListBox {
+                                        add_css_class: "boxed-list",
+                                        set_selection_mode: gtk::SelectionMode::None,
+                                        set_valign: gtk::Align::Start,
+                                    },
+                                },
+
+                                gtk::Label {
+                                    #[watch]
+                                    set_visible: model.rooms_empty_hint.is_some(),
+                                    #[watch]
+                                    set_label: model.rooms_empty_hint.as_deref().unwrap_or(""),
+                                    add_css_class: "dim-label",
+                                    set_margin_top: 24,
+                                },
                             },
                         },
 
