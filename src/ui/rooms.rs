@@ -29,6 +29,24 @@ pub fn rooms_screen(ui: &mut egui::Ui, th: &Theme, state: &mut AppState) -> Room
     }
     ui.add_space(sp.sm);
 
+    let spaces: Vec<_> = state.spaces().into_iter().cloned().collect();
+    if !spaces.is_empty() {
+        egui::ScrollArea::horizontal().id_salt("space-chips").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if space_chip(ui, th, "Home", state.active_space.is_none()).clicked() {
+                    state.active_space = None;
+                }
+                for space in &spaces {
+                    let selected = state.active_space.as_deref() == Some(space.id.as_str());
+                    if space_chip(ui, th, &space.name, selected).clicked() {
+                        state.active_space = if selected { None } else { Some(space.id.clone()) };
+                    }
+                }
+            });
+        });
+        ui.add_space(sp.sm);
+    }
+
     text_field_singleline(ui, th, &mut state.room_filter);
     ui.add_space(sp.md);
 
@@ -85,4 +103,38 @@ pub fn rooms_screen(ui: &mut egui::Ui, th: &Theme, state: &mut AppState) -> Room
     });
 
     action
+}
+
+/// A selectable pill for the space filter row (modeled on vidya's
+/// `reaction_chip`, which is styled but not click-toggle-aware).
+fn space_chip(ui: &mut egui::Ui, th: &Theme, label: &str, selected: bool) -> egui::Response {
+    let p = &th.palette;
+    let (fill, border, text_color) = if selected {
+        (p.accent, egui::Stroke::new(1.0_f32, p.accent), p.accent_fg)
+    } else {
+        (p.headerbar_bg, egui::Stroke::new(1.0_f32, p.border_soft), p.text)
+    };
+
+    let frame = egui::Frame::new()
+        .fill(fill)
+        .stroke(border)
+        .corner_radius(12.0)
+        .inner_margin(egui::Margin::symmetric(10, 4));
+
+    let resp = ui
+        .scope(|ui| {
+            frame
+                .show(ui, |ui| {
+                    ui.label(RichText::new(label).size(th.type_scale.caption).color(text_color));
+                })
+                .response
+        })
+        .inner;
+
+    let resp = resp.interact(egui::Sense::click());
+    if let Some(cursor) = ui.visuals().interact_cursor {
+        resp.on_hover_cursor(cursor)
+    } else {
+        resp
+    }
 }

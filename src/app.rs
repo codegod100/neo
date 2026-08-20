@@ -66,8 +66,17 @@ impl NeoApp {
                     self.state.sso_url = None;
                     self.state.error = Some(err);
                 }
-                MatrixEvent::Rooms(rooms) => {
+                MatrixEvent::Rooms { rooms, space_children } => {
+                    // A space the user switched into may have been left/removed
+                    // server-side by the time this poll lands — fall back to Home
+                    // instead of showing an empty, unrecoverable filtered list.
+                    if let Some(active) = &self.state.active_space {
+                        if !space_children.contains_key(active) {
+                            self.state.active_space = None;
+                        }
+                    }
                     self.state.rooms = rooms;
+                    self.state.space_children = space_children;
                 }
                 MatrixEvent::Timeline { room_id, messages, prepend } => {
                     self.apply_timeline(room_id, messages, prepend);
@@ -166,13 +175,17 @@ impl NeoApp {
                     homeserver: self.state.form_homeserver.trim().to_owned(),
                     username: self.state.form_username.trim().to_owned(),
                     password: self.state.form_password.clone(),
+                    remember: self.state.remember_me,
                 });
             }
             ConnectAction::Sso => {
                 self.state.connection = ConnectionState::Connecting;
                 self.state.error = None;
                 self.state.sso_url = None;
-                self.send(MatrixCmd::LoginSso { homeserver: self.state.form_homeserver.trim().to_owned() });
+                self.send(MatrixCmd::LoginSso {
+                    homeserver: self.state.form_homeserver.trim().to_owned(),
+                    remember: self.state.remember_me,
+                });
             }
             ConnectAction::CancelSso => {
                 // The bridge task may still complete in the background (it

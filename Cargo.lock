@@ -3078,6 +3078,8 @@ dependencies = [
  "log",
  "matrix-sdk",
  "open",
+ "serde",
+ "serde_json",
  "tokio",
  "url",
  "vidya",

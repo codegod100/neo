@@ -39,6 +39,9 @@ pub struct RoomSummary {
     pub preview: String,
     pub encrypted: bool,
     pub direct: bool,
+    /// True for Matrix Spaces (`m.room.create` with `type: "m.space"`) —
+    /// these group other rooms rather than carrying messages themselves.
+    pub is_space: bool,
 }
 
 /// One rendered chat line.
@@ -88,6 +91,13 @@ pub struct AppState {
     pub oldest_token: HashMap<String, Option<String>>,
     pub loading_older: bool,
 
+    // --- Spaces ---
+    /// Space room ID -> child room IDs, from the last `MatrixEvent::Rooms`.
+    pub space_children: HashMap<String, Vec<String>>,
+    /// Selected space filter for the room list; `None` shows every joined
+    /// room ("Home"), same as before spaces existed.
+    pub active_space: Option<String>,
+
     // --- Compose ---
     pub compose: String,
 
@@ -116,6 +126,8 @@ impl Default for AppState {
             messages: HashMap::new(),
             oldest_token: HashMap::new(),
             loading_older: false,
+            space_children: HashMap::new(),
+            active_space: None,
             compose: String::new(),
             toasts: Vec::new(),
             last_poll: Instant::now() - Duration::from_secs(60),
@@ -139,10 +151,19 @@ impl AppState {
 
     pub fn filtered_rooms(&self) -> Vec<&RoomSummary> {
         let needle = self.room_filter.trim().to_lowercase();
+        let space_members = self.active_space.as_ref().and_then(|id| self.space_children.get(id));
         self.rooms
             .iter()
+            .filter(|r| !r.is_space)
             .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(&needle))
+            .filter(|r| space_members.map_or(true, |members| members.iter().any(|id| id == &r.id)))
             .collect()
+    }
+
+    /// Joined spaces, sorted by name — rendered as filter chips above the
+    /// room list ("Home" plus one per space).
+    pub fn spaces(&self) -> Vec<&RoomSummary> {
+        self.rooms.iter().filter(|r| r.is_space).collect()
     }
 
     pub fn reset_session(&mut self) {
@@ -154,6 +175,8 @@ impl AppState {
         self.active_room = None;
         self.messages.clear();
         self.oldest_token.clear();
+        self.space_children.clear();
+        self.active_space = None;
         self.screen = Screen::Connect;
     }
 }

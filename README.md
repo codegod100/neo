@@ -21,7 +21,8 @@ Mirrors sleek's shape:
 - `src/matrix_bridge.rs` — the entire network layer. A dedicated OS thread runs its
   own Tokio runtime driving a `matrix_sdk::Client`. The UI thread talks to it over an
   `mpsc` channel: `MatrixCmd` in (`Login`, `LoginSso`, `Poll`, `OpenRoom`, `LoadOlder`,
-  `Send`, `Logout`), `MatrixEvent` out (`LoggedIn`, `SsoUrl`, `Rooms`, `Timeline`, ...).
+  `Send`, `Logout`), `MatrixEvent` out (`LoggedIn`, `SsoUrl`, `Rooms { rooms,
+  space_children }`, `Timeline`, ...).
   There's no continuous sync loop — the UI drives a `Poll` command every 3s while
   connected, keeping all bridge state local to one async task instead of behind shared
   mutexes. `LoginSso` is the one command that doesn't run inline: it can sit waiting on
@@ -59,6 +60,24 @@ Session data (including the E2EE sqlite store) is kept under
 `$XDG_DATA_HOME/neo/<homeserver>-<username>/` (`<homeserver>-sso` for SSO logins, since
 the username isn't known until after the login completes).
 
+Checking **Remember me on this device** (applies to both password and SSO login) saves
+the logged-in session — homeserver, user ID, device ID, and access/refresh tokens — to
+`$XDG_DATA_HOME/neo/session.json`. On the next launch neo restores it automatically and
+skips the connect screen entirely. Logging out deletes this file. This also matters for
+end-to-end encryption: matrix-sdk's sqlite crypto store is bound to a single device ID,
+so without a remembered session, every launch would log in as a *new* device against the
+same store and eventually corrupt it (`CryptoStoreError::MismatchedAccount`). As a
+safety net, if neo ever detects that mismatch on login (e.g. from a store that predates
+this feature), it automatically wipes and rebuilds the store for that account and retries
+once, rather than leaving you stuck.
+
+Joined [Matrix Spaces](https://spec.matrix.org/latest/client-server-api/#spaces) show up
+as filter chips ("Home" + one per space) above the room list — space rooms are never
+listed as chats themselves. Membership comes from each space's local `m.space.child`
+state (no server hierarchy query), one level deep: sub-spaces aren't flattened into
+their parent's chip, and children the space admin hasn't invited/added locally won't
+show until they do.
+
 ## Known limitations
 
 - Polling, not live sync — new messages appear up to ~3s late.
@@ -68,3 +87,5 @@ the username isn't known until after the login completes).
   from waiting; if you finish the browser flow anyway, you'll still end up signed in.
 - SSO store paths are keyed by homeserver only, so multiple SSO accounts on the same
   homeserver currently share one local session store.
+- Space membership is one level deep and read from local state only — no
+  `/hierarchy` query, so nested subspaces and not-yet-synced children aren't shown.

@@ -32,6 +32,9 @@ pub fn connect_screen(ui: &mut egui::Ui, th: &Theme, state: &mut AppState) -> Co
             return;
         }
 
+        checkbox(ui, th, &mut state.remember_me, "Remember me on this device");
+        ui.add_space(sp.md);
+
         card(ui, th, |ui| {
             title_2(ui, th, "Sign in");
             ui.add_space(sp.sm);
@@ -56,9 +59,6 @@ pub fn connect_screen(ui: &mut egui::Ui, th: &Theme, state: &mut AppState) -> Co
                     .margin(th.text_edit_margin())
                     .desired_width(ui.available_width()),
             );
-            ui.add_space(sp.md);
-
-            checkbox(ui, th, &mut state.remember_me, "Remember me on this device");
             ui.add_space(sp.md);
 
             if let Some(err) = &state.error {
