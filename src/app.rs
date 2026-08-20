@@ -807,12 +807,14 @@ impl AppModel {
         guard.push_back(SpaceChip {
             id: None,
             label: "Home".to_owned(),
+            avatar: None,
             selected: self.active_space.is_none(),
         });
         for space in spaces {
             guard.push_back(SpaceChip {
                 id: Some(space.id.clone()),
                 label: space.name.clone(),
+                avatar: space.avatar.clone(),
                 selected: self.active_space.as_deref() == Some(space.id.as_str()),
             });
         }

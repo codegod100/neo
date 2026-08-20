@@ -52,6 +52,10 @@ pub struct RoomSummary {
     /// True for Matrix Spaces (`m.room.create` with `type: "m.space"`) —
     /// these group other rooms rather than carrying messages themselves.
     pub is_space: bool,
+    /// Raw bytes of the room's avatar thumbnail, if it has one set. Only
+    /// fetched for spaces today (see `matrix_bridge::room_summary`), so the
+    /// space filter chips can show an image instead of just initials.
+    pub avatar: Option<Vec<u8>>,
 }
 
 /// One rendered chat line.
