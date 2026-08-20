@@ -1,2 +1,5 @@
 [env]
 PKG_CONFIG_PATH = "/home/linuxbrew/.linuxbrew/lib/pkgconfig"
+
+[build]
+rustc-wrapper = "sccache"
