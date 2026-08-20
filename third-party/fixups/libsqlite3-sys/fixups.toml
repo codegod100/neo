@@ -1,0 +1,20 @@
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+#
+# build.rs (bundled feature) compiles sqlite3.c into a static lib via `cc`
+# and emits `cargo:rustc-link-lib=`/`cargo:rustc-link-search=` for it (or,
+# for system sqlite, pkg-config's own link directives) - without these, the
+# final binary link is missing the sqlite3 symbols.
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true
+
+[buildscript.run.env]
+# build.rs shells out to the `cc` crate, which reads these standard
+# Cargo build-profile env vars directly (reindeer's cargo_env only
+# covers CARGO_PKG_* - these aren't part of that set).
+OPT_LEVEL = "0"
+DEBUG = "true"

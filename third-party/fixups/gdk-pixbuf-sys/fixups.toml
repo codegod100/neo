@@ -1,0 +1,10 @@
+# This -sys crate's build.rs uses `system-deps`/pkg-config to locate the
+# system GTK4/libadwaita stack; besides the `--cfg=system_deps_have_*`
+# flags reindeer captures by default, its build.rs also emits
+# `cargo:rustc-link-lib=`/`cargo:rustc-link-search=` directives that must
+# be translated into real `-l`/`-L` rustc flags for the final binary
+# link to find libgtk-4, libglib-2.0, etc - reindeer doesn't do this by
+# default.
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true

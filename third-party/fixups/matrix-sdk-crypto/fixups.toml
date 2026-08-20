@@ -1,0 +1,9 @@
+# src/lib.rs does `include_str!("../README.md")` - reindeer's default srcs
+# detection only follows `mod` declarations across .rs files.
+#
+# Cargo.toml itself is also needed: ruma-macros' StringEnum derive uses
+# `proc_macro_crate::crate_name` to figure out whether to emit `::ruma_common`
+# or `::ruma::...` paths, which reads CARGO_MANIFEST_DIR/Cargo.toml directly -
+# not included in srcs by default. matrix-sdk-crypto depends on `ruma` (not
+# `ruma-common` directly), same as matrix-sdk-common.
+extra_srcs = ["README.md", "Cargo.toml"]

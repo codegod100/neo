@@ -1,0 +1,4 @@
+# src/alg_id.rs does `include_bytes!("data/alg-*.der")` for a couple dozen
+# DER-encoded AlgorithmIdentifier constants - not reachable via reindeer's
+# default `mod`-declaration-based srcs walk.
+extra_srcs = ["src/data/**"]

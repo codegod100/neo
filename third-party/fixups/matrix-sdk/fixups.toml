@@ -1,0 +1,18 @@
+# src/lib.rs and several submodules pull in doc pages via
+# `#[doc = include_str!(...)]` (crate-root README.md, src/docs/*.md,
+# src/widget/README.md, src/sliding_sync/README.md) - reindeer's default
+# srcs detection only follows `mod` declarations across .rs files.
+#
+# Cargo.toml itself is also needed: ruma-macros' StringEnum-family derives
+# use `proc_macro_crate::crate_name` to figure out whether to emit
+# `::ruma_common` or `::ruma::...` paths, which reads
+# CARGO_MANIFEST_DIR/Cargo.toml directly - not included in srcs by default.
+# matrix-sdk depends on `ruma` (not `ruma-common` directly).
+extra_srcs = ["README.md", "src/docs/**", "src/widget/README.md", "src/sliding_sync/README.md", "Cargo.toml"]
+
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+buildscript.run = true

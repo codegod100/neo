@@ -1,0 +1,6 @@
+# src/aws_lc_rs_algs.rs and src/ring_algs.rs do `include_bytes!("data/alg-*.der")`
+# for a few DER-encoded AlgorithmIdentifier constants - not reachable via
+# reindeer's default `mod`-declaration-based srcs walk. (The other
+# include_bytes! hits in this crate are all `#[test]`-gated fixtures under
+# tests/ and don't need a real-build fixup.)
+extra_srcs = ["src/data/**"]

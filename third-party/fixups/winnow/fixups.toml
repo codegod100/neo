@@ -1,0 +1,5 @@
+# src/lib.rs does `#[doc = include_str!("../README.md")]` and
+# `#![doc = include_str!("../examples/css/parser.rs")]` - reindeer's default
+# srcs detection only follows `mod` declarations across .rs files, so these
+# crate-root-relative files never get picked up.
+extra_srcs = ["README.md", "examples/css/parser.rs"]

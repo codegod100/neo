@@ -1,0 +1,12 @@
+# Many src/**/*.rs files do
+# `#[doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/doc/string_enum.md"))]`
+# - reindeer's default srcs detection only follows `mod` declarations across
+# .rs files, so this crate-root-relative file never gets picked up.
+extra_srcs = ["src/doc/string_enum.md"]
+
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+buildscript.run = true

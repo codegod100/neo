@@ -1,0 +1,27 @@
+# Several src/**/*.rs files do `include_bytes!("*.der")` for DER-encoded
+# PKCS8/certificate templates that sit next to the .rs file (or a sibling
+# `data/` dir) - not reachable via reindeer's default `mod`-declaration-based
+# srcs walk.
+extra_srcs = ["src/**/*.der"]
+
+# reindeer requires an explicit buildscript.run fixup for every crate
+# whose build.rs must actually execute (see docs/MANUAL.md "Build and
+# run build.rs build scripts" - buildscript.run has no default and
+# reindeer silently omits the build script entirely, rather than
+# erroring, when it's left unset).
+#
+# build.rs compiles ring's C/asm sources into a static lib via the `cc`
+# crate and emits `cargo:rustc-link-search=native=...` /
+# `cargo:rustc-link-lib=static=ring_core_...` for it - without these, the
+# final binary link is missing the C symbols ring's Rust code calls into
+# (e.g. ring_core_..._CRYPTO_poly1305_init, ..._p256_point_mul).
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true
+
+[buildscript.run.env]
+# build.rs shells out to the `cc` crate, which reads these standard
+# Cargo build-profile env vars directly (reindeer's cargo_env only
+# covers CARGO_PKG_* - these aren't part of that set).
+OPT_LEVEL = "0"
+DEBUG = "true"

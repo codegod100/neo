@@ -1,0 +1,5 @@
+# Several submodules pull in doc pages from src/docs/*.md via
+# `#[doc = include_str!(...)]` (used for shared rustdoc snippets) -
+# reindeer's default srcs detection only follows `mod` declarations across
+# .rs files.
+extra_srcs = ["src/docs/**"]

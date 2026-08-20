@@ -1,0 +1,4 @@
+# src/tool.rs does `include_bytes!("detect_compiler_family.c")` (a sibling
+# file to tool.rs itself, not under `mod`) - reindeer's default srcs
+# detection doesn't pick it up.
+extra_srcs = ["src/detect_compiler_family.c"]

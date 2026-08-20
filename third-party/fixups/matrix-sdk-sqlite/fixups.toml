@@ -1,0 +1,5 @@
+# src/{crypto_store,event_cache_store,state_store}.rs embed their sqlite
+# schema migrations via `include_str!("../migrations/.../NNN_*.sql")` -
+# reindeer's default srcs detection only follows `mod` declarations across
+# .rs files, so these never get picked up.
+extra_srcs = ["migrations/**"]

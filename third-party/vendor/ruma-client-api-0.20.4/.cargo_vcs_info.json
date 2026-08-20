@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "c62b7f999aa1bf492e77926650f44ce663689e82"
+  },
+  "path_in_vcs": "crates/ruma-client-api"
+}
