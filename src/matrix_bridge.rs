@@ -478,7 +478,14 @@ async fn flatten_room_summaries(rooms: &Vector<Room>) -> Vec<RoomSummary> {
 }
 
 async fn room_summary(room: &Room) -> RoomSummary {
-    let name = room.name().unwrap_or_else(|| room.room_id().to_string());
+    // Use the spec-defined display name calculation (m.room.name, falling back
+    // to the canonical alias, then to a computed name from members) so the
+    // channel view shows the canonical title rather than a raw room ID.
+    let name = room
+        .display_name()
+        .await
+        .map(|n| n.to_string())
+        .unwrap_or_else(|_| room.room_id().to_string());
     let is_space = room.is_space();
     // Only spaces need their avatar today (for the filter chips above the
     // room list), so skip the download for every other room.
