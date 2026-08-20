@@ -1,26 +1,16 @@
-//! neo — a matrix.org chat client shelled in Vidya, following sleek's
-//! connect → chats → chat → settings flow but speaking Matrix instead of IRC.
+//! neo — a matrix.org chat client built with Relm4 (GTK4 + libadwaita),
+//! following sleek's connect → chats → chat → settings flow but speaking
+//! Matrix instead of IRC.
 
 mod app;
+mod factory;
 mod matrix_bridge;
 mod state;
-mod ui;
 
-use eframe::egui::ViewportBuilder;
+use relm4::RelmApp;
 
-fn main() -> eframe::Result {
+fn main() {
     env_logger::init();
-
-    let viewport = ViewportBuilder::default()
-        .with_title("neo")
-        .with_inner_size([420.0, 800.0])
-        .with_min_inner_size([320.0, 480.0]);
-
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
-
-    eframe::run_native(
-        "neo",
-        options,
-        Box::new(|cc| Ok(Box::new(app::NeoApp::new(&cc.egui_ctx)))),
-    )
+    let app = RelmApp::new("org.neo.Neo");
+    app.run::<app::AppModel>(());
 }

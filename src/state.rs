@@ -1,9 +1,7 @@
-//! Application state — shared between the eframe UI thread and the Matrix
-//! bridge thread. Room/message identifiers are plain `String`s here (Matrix
-//! `RoomId`/`EventId` values) so the UI layer never has to depend on `ruma`.
-
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+//! Plain domain data shared between the Matrix bridge thread and the
+//! Relm4/GTK UI. Room/message identifiers are plain `String`s here (Matrix
+//! `RoomId`/`EventId` values) so `matrix_bridge` doesn't have to depend on
+//! any GTK types, and the UI doesn't have to depend on `ruma`.
 
 /// Top-level screen the shell is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +10,18 @@ pub enum Screen {
     Rooms,
     Room,
     Settings,
+}
+
+impl Screen {
+    /// Name used as the `gtk::Stack` page id.
+    pub fn name(self) -> &'static str {
+        match self {
+            Screen::Connect => "connect",
+            Screen::Rooms => "rooms",
+            Screen::Room => "room",
+            Screen::Settings => "settings",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,130 +63,4 @@ pub struct ChatMessage {
     pub ts_millis: i64,
     pub own: bool,
     pub pending: bool,
-}
-
-/// A toast/status banner shown briefly at the bottom of the shell.
-#[derive(Debug, Clone)]
-pub struct Toast {
-    pub text: String,
-    pub created: Instant,
-}
-
-const TOAST_DURATION: Duration = Duration::from_secs(4);
-
-pub struct AppState {
-    pub screen: Screen,
-    pub dark: bool,
-
-    // --- Connect form ---
-    pub form_homeserver: String,
-    pub form_username: String,
-    pub form_password: String,
-    pub remember_me: bool,
-
-    // --- Session ---
-    pub connection: ConnectionState,
-    pub user_id: Option<String>,
-    pub homeserver: Option<String>,
-    pub error: Option<String>,
-    /// Set while an SSO login is in flight — the URL the bridge opened (or
-    /// tried to open) in the system browser, shown as a fallback link.
-    pub sso_url: Option<String>,
-
-    // --- Rooms ---
-    pub rooms: Vec<RoomSummary>,
-    pub room_filter: String,
-    pub active_room: Option<String>,
-    pub messages: HashMap<String, Vec<ChatMessage>>,
-    pub oldest_token: HashMap<String, Option<String>>,
-    pub loading_older: bool,
-
-    // --- Spaces ---
-    /// Space room ID -> child room IDs, from the last `MatrixEvent::Rooms`.
-    pub space_children: HashMap<String, Vec<String>>,
-    /// Selected space filter for the room list; `None` shows every joined
-    /// room ("Home"), same as before spaces existed.
-    pub active_space: Option<String>,
-
-    // --- Compose ---
-    pub compose: String,
-
-    // --- Misc UI ---
-    pub toasts: Vec<Toast>,
-    pub last_poll: Instant,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            screen: Screen::Connect,
-            dark: true,
-            form_homeserver: "matrix.org".to_owned(),
-            form_username: String::new(),
-            form_password: String::new(),
-            remember_me: true,
-            connection: ConnectionState::Disconnected,
-            user_id: None,
-            homeserver: None,
-            error: None,
-            sso_url: None,
-            rooms: Vec::new(),
-            room_filter: String::new(),
-            active_room: None,
-            messages: HashMap::new(),
-            oldest_token: HashMap::new(),
-            loading_older: false,
-            space_children: HashMap::new(),
-            active_space: None,
-            compose: String::new(),
-            toasts: Vec::new(),
-            last_poll: Instant::now() - Duration::from_secs(60),
-        }
-    }
-}
-
-impl AppState {
-    pub fn toast(&mut self, text: impl Into<String>) {
-        self.toasts.push(Toast { text: text.into(), created: Instant::now() });
-    }
-
-    pub fn expire_toasts(&mut self) {
-        self.toasts.retain(|t| t.created.elapsed() < TOAST_DURATION);
-    }
-
-    pub fn active_room_summary(&self) -> Option<&RoomSummary> {
-        let id = self.active_room.as_ref()?;
-        self.rooms.iter().find(|r| &r.id == id)
-    }
-
-    pub fn filtered_rooms(&self) -> Vec<&RoomSummary> {
-        let needle = self.room_filter.trim().to_lowercase();
-        let space_members = self.active_space.as_ref().and_then(|id| self.space_children.get(id));
-        self.rooms
-            .iter()
-            .filter(|r| !r.is_space)
-            .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(&needle))
-            .filter(|r| space_members.map_or(true, |members| members.iter().any(|id| id == &r.id)))
-            .collect()
-    }
-
-    /// Joined spaces, sorted by name — rendered as filter chips above the
-    /// room list ("Home" plus one per space).
-    pub fn spaces(&self) -> Vec<&RoomSummary> {
-        self.rooms.iter().filter(|r| r.is_space).collect()
-    }
-
-    pub fn reset_session(&mut self) {
-        self.connection = ConnectionState::Disconnected;
-        self.user_id = None;
-        self.homeserver = None;
-        self.sso_url = None;
-        self.rooms.clear();
-        self.active_room = None;
-        self.messages.clear();
-        self.oldest_token.clear();
-        self.space_children.clear();
-        self.active_space = None;
-        self.screen = Screen::Connect;
-    }
 }

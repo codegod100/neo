@@ -1,106 +1,773 @@
-//! neo eframe app — wires the Matrix bridge to the vidya-themed UI.
+//! neo's single Relm4 component: owns every screen's state and view tree
+//! (switched via a `gtk::Stack`, not separate child components — the whole
+//! app is small enough that one `AppModel` mirrors the old single-`AppState`
+//! shape closely) and bridges [`crate::matrix_bridge`]'s `mpsc` channel into
+//! Relm4's message loop.
 
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
 
-use eframe::egui;
-use tokio::sync::mpsc;
-use vidya::{apply_dark, apply_light, Theme};
+use adw::prelude::*;
+use relm4::abstractions::Toaster;
+use relm4::factory::FactoryVecDeque;
+use relm4::prelude::*;
 
-use crate::matrix_bridge::{MatrixCmd, MatrixEvent};
-use crate::state::{AppState, ChatMessage, ConnectionState, Screen};
-use crate::ui::{self, ConnectAction, RoomAction, RoomsAction, SettingsAction};
+use crate::factory::message_row::MessageRow;
+use crate::factory::room_row::{RoomRow, RoomRowOutput};
+use crate::factory::space_chip::{SpaceChip, SpaceChipOutput};
+use crate::matrix_bridge::{self, MatrixCmd, MatrixEvent};
+use crate::state::{ChatMessage, ConnectionState, RoomSummary, Screen};
 
-/// How often the UI asks the bridge to re-sync while connected.
-const POLL_INTERVAL: Duration = Duration::from_secs(3);
+pub struct AppModel {
+    cmd_tx: tokio::sync::mpsc::UnboundedSender<MatrixCmd>,
 
-pub struct NeoApp {
-    state: AppState,
-    cmd_tx: mpsc::UnboundedSender<MatrixCmd>,
-    evt_rx: mpsc::UnboundedReceiver<MatrixEvent>,
-    theme_dark: bool,
+    screen: Screen,
+    dark: bool,
+
+    // --- Connect form ---
+    homeserver_buf: gtk::EntryBuffer,
+    username_buf: gtk::EntryBuffer,
+    password_buf: gtk::EntryBuffer,
+    remember_me: bool,
+
+    // --- Session ---
+    connection: ConnectionState,
+    user_id: Option<String>,
+    homeserver: Option<String>,
+    error: Option<String>,
+    sso_url: Option<String>,
+
+    // --- Rooms ---
+    rooms: Vec<RoomSummary>,
+    room_filter_buf: gtk::EntryBuffer,
+    rooms_empty_hint: Option<String>,
+    active_room: Option<String>,
+    messages: HashMap<String, Vec<ChatMessage>>,
+    loading_older: bool,
+
+    // --- Spaces ---
+    space_children: HashMap<String, Vec<String>>,
+    active_space: Option<String>,
+    has_spaces: bool,
+
+    // --- Compose ---
+    compose_buf: gtk::EntryBuffer,
+
+    // --- Factories ---
+    room_factory: FactoryVecDeque<RoomRow>,
+    message_factory: FactoryVecDeque<MessageRow>,
+    space_factory: FactoryVecDeque<SpaceChip>,
+
+    toaster: Toaster,
 }
 
-impl NeoApp {
-    pub fn new(ctx: &egui::Context) -> Self {
-        let (cmd_tx, evt_rx) = crate::matrix_bridge::spawn();
-        apply_dark(ctx);
-        Self { state: AppState::default(), cmd_tx, evt_rx, theme_dark: true }
-    }
+#[derive(Debug)]
+pub enum AppMsg {
+    // Connect screen
+    Login,
+    Sso,
+    ReopenSso,
+    CancelSso,
+    ToggleRemember(bool),
 
-    fn theme(&self) -> Theme {
-        if self.state.dark { Theme::dark() } else { Theme::light() }
-    }
+    // Rooms screen
+    FilterChanged,
+    SelectSpace(Option<String>),
+    OpenRoom(String),
+    OpenSettings,
 
-    fn send(&self, cmd: MatrixCmd) {
-        let _ = self.cmd_tx.send(cmd);
-    }
+    // Room screen
+    Back,
+    Send,
+    LoadOlder,
 
-    fn drain_events(&mut self, ctx: &egui::Context) {
-        while let Ok(event) = self.evt_rx.try_recv() {
-            match event {
-                MatrixEvent::Connecting => {
-                    self.state.connection = ConnectionState::Connecting;
-                    self.state.error = None;
-                }
-                MatrixEvent::SsoUrl(url) => {
-                    // Best-effort auto-open; the connect screen also shows
-                    // `url` as a fallback link/"Open again" button in case
-                    // there's no default browser configured (e.g. sandboxed
-                    // or headless environments).
-                    let _ = open::that_detached(&url);
-                    self.state.sso_url = Some(url);
-                }
-                MatrixEvent::LoggedIn { user_id, homeserver } => {
-                    self.state.connection = ConnectionState::Connected;
-                    self.state.user_id = Some(user_id);
-                    self.state.homeserver = Some(homeserver);
-                    self.state.error = None;
-                    self.state.sso_url = None;
-                    self.state.screen = Screen::Rooms;
-                    self.state.form_password.clear();
-                    self.state.last_poll = Instant::now();
-                    self.state.toast("Signed in");
-                }
-                MatrixEvent::LoginFailed(err) => {
-                    self.state.connection = ConnectionState::Disconnected;
-                    self.state.sso_url = None;
-                    self.state.error = Some(err);
-                }
-                MatrixEvent::Rooms { rooms, space_children } => {
-                    // A space the user switched into may have been left/removed
-                    // server-side by the time this poll lands — fall back to Home
-                    // instead of showing an empty, unrecoverable filtered list.
-                    if let Some(active) = &self.state.active_space {
-                        if !space_children.contains_key(active) {
-                            self.state.active_space = None;
-                        }
-                    }
-                    self.state.rooms = rooms;
-                    self.state.space_children = space_children;
-                }
-                MatrixEvent::Timeline { room_id, messages, prepend } => {
-                    self.apply_timeline(room_id, messages, prepend);
-                }
-                MatrixEvent::SendFailed { room_id: _, error } => {
-                    self.state.toast(format!("Send failed: {error}"));
-                }
-                MatrixEvent::Error(err) => {
-                    self.state.toast(err);
-                }
-                MatrixEvent::LoggedOut => {
-                    self.state.reset_session();
-                }
-            }
-            ctx.request_repaint();
+    // Settings screen
+    ToggleTheme(bool),
+    Logout,
+
+    // From the bridge thread.
+    Bridge(MatrixEvent),
+}
+
+#[relm4::component(pub)]
+impl SimpleComponent for AppModel {
+    type Init = ();
+    type Input = AppMsg;
+    type Output = ();
+
+    view! {
+        #[root]
+        adw::ApplicationWindow {
+            set_title: Some("neo"),
+            set_default_width: 420,
+            set_default_height: 800,
+
+            #[local_ref]
+            toast_overlay -> adw::ToastOverlay {
+                #[wrap(Some)]
+                set_child = &gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+
+                    adw::HeaderBar {
+                        #[wrap(Some)]
+                        set_title_widget = &adw::WindowTitle {
+                            set_title: "neo",
+                            #[watch]
+                            set_subtitle: model.connection.label(),
+                        },
+                    },
+
+                    gtk::Stack {
+                        set_vexpand: true,
+                        set_transition_type: gtk::StackTransitionType::Crossfade,
+
+                        add_named[Some("connect")] = &gtk::ScrolledWindow {
+                            set_vexpand: true,
+
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_spacing: 16,
+                                set_margin_all: 24,
+                                set_valign: gtk::Align::Center,
+                                set_halign: gtk::Align::Center,
+                                set_width_request: 360,
+
+                                gtk::Label { set_label: "neo", add_css_class: "title-1" },
+                                gtk::Label {
+                                    set_label: "A matrix.org client.",
+                                    add_css_class: "dim-label",
+                                },
+
+                                gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    set_spacing: 12,
+                                    #[watch]
+                                    set_visible: model.sso_url.is_some(),
+
+                                    gtk::Label {
+                                        set_label: "Continue in your browser",
+                                        add_css_class: "title-3",
+                                    },
+                                    gtk::Label {
+                                        set_label: "We opened your homeserver's sign-in page. Waiting for it to finish…",
+                                        set_wrap: true,
+                                        add_css_class: "dim-label",
+                                    },
+                                    gtk::Spinner { set_spinning: true, set_halign: gtk::Align::Center },
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: model.sso_url.as_deref().unwrap_or(""),
+                                        set_wrap: true,
+                                        set_selectable: true,
+                                        add_css_class: "caption",
+                                        add_css_class: "dim-label",
+                                    },
+                                    gtk::Box {
+                                        set_orientation: gtk::Orientation::Horizontal,
+                                        set_spacing: 8,
+                                        set_halign: gtk::Align::Center,
+
+                                        gtk::Button {
+                                            set_label: "Open again",
+                                            connect_clicked => AppMsg::ReopenSso,
+                                        },
+                                        gtk::Button {
+                                            set_label: "Cancel",
+                                            connect_clicked => AppMsg::CancelSso,
+                                        },
+                                    },
+                                },
+
+                                gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    set_spacing: 12,
+                                    #[watch]
+                                    set_visible: model.sso_url.is_none(),
+
+                                    gtk::Label {
+                                        #[watch]
+                                        set_visible: model.error.is_some(),
+                                        #[watch]
+                                        set_label: model.error.as_deref().unwrap_or(""),
+                                        set_wrap: true,
+                                        add_css_class: "error",
+                                    },
+
+                                    adw::PreferencesGroup {
+                                        set_title: "Sign in",
+                                        set_description: Some("Your homeserver account — the same one Element uses."),
+
+                                        adw::ActionRow {
+                                            set_title: "Homeserver",
+                                            add_suffix = &gtk::Entry {
+                                                set_buffer: &model.homeserver_buf,
+                                                set_valign: gtk::Align::Center,
+                                                set_hexpand: true,
+                                            },
+                                        },
+                                        adw::ActionRow {
+                                            set_title: "Username",
+                                            add_suffix = &gtk::Entry {
+                                                set_buffer: &model.username_buf,
+                                                set_valign: gtk::Align::Center,
+                                                set_hexpand: true,
+                                            },
+                                        },
+                                        adw::ActionRow {
+                                            set_title: "Password",
+                                            add_suffix = &gtk::Entry {
+                                                set_buffer: &model.password_buf,
+                                                set_visibility: false,
+                                                set_input_purpose: gtk::InputPurpose::Password,
+                                                set_valign: gtk::Align::Center,
+                                                set_hexpand: true,
+                                                connect_activate => AppMsg::Login,
+                                            },
+                                        },
+                                        // AdwSwitchRow (like ActionRow) is a
+                                        // ListBoxRow — it must live inside a
+                                        // PreferencesGroup/ListBox, not a
+                                        // plain Box.
+                                        adw::SwitchRow {
+                                            set_title: "Remember me on this device",
+                                            #[watch]
+                                            #[block_signal(remember_handler)]
+                                            set_active: model.remember_me,
+                                            connect_active_notify[sender] => move |row| {
+                                                sender.input(AppMsg::ToggleRemember(row.is_active()));
+                                            } @remember_handler,
+                                        },
+                                    },
+
+                                    gtk::Button {
+                                        add_css_class: "suggested-action",
+                                        add_css_class: "pill",
+                                        #[watch]
+                                        set_label: if model.connection == ConnectionState::Connecting {
+                                            "Signing in…"
+                                        } else {
+                                            "Sign in"
+                                        },
+                                        #[watch]
+                                        set_sensitive: model.connection != ConnectionState::Connecting,
+                                        connect_clicked => AppMsg::Login,
+                                    },
+
+                                    gtk::Label {
+                                        set_label: "— or —",
+                                        set_halign: gtk::Align::Center,
+                                        add_css_class: "dim-label",
+                                    },
+
+                                    gtk::Button {
+                                        add_css_class: "pill",
+                                        #[watch]
+                                        set_label: if model.connection == ConnectionState::Connecting {
+                                            "Signing in…"
+                                        } else {
+                                            "Sign in with SSO"
+                                        },
+                                        #[watch]
+                                        set_sensitive: model.connection != ConnectionState::Connecting,
+                                        connect_clicked => AppMsg::Sso,
+                                    },
+
+                                    gtk::Label {
+                                        set_label: "Login only — registration isn't supported yet. Passwords \
+                                            go straight to your homeserver over HTTPS and are never stored by \
+                                            neo unless you remember this device.",
+                                        set_wrap: true,
+                                        add_css_class: "caption",
+                                        add_css_class: "dim-label",
+                                    },
+                                },
+                            },
+                        },
+
+                        add_named[Some("rooms")] = &gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            set_margin_all: 12,
+
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Label {
+                                    #[watch]
+                                    set_label: model.user_id.as_deref().unwrap_or(""),
+                                    add_css_class: "dim-label",
+                                    set_hexpand: true,
+                                    set_halign: gtk::Align::Start,
+                                    set_ellipsize: gtk::pango::EllipsizeMode::Middle,
+                                },
+                                gtk::Button {
+                                    set_icon_name: "emblem-system-symbolic",
+                                    set_tooltip_text: Some("Settings"),
+                                    connect_clicked => AppMsg::OpenSettings,
+                                },
+                            },
+
+                            gtk::ScrolledWindow {
+                                #[watch]
+                                set_visible: model.has_spaces,
+                                set_vscrollbar_policy: gtk::PolicyType::Never,
+                                set_hscrollbar_policy: gtk::PolicyType::Automatic,
+
+                                #[local_ref]
+                                space_chip_box -> gtk::Box {
+                                    set_orientation: gtk::Orientation::Horizontal,
+                                    set_spacing: 6,
+                                },
+                            },
+
+                            gtk::Entry {
+                                set_buffer: &model.room_filter_buf,
+                                set_placeholder_text: Some("Search rooms…"),
+                                set_primary_icon_name: Some("system-search-symbolic"),
+                                connect_changed => AppMsg::FilterChanged,
+                            },
+
+                            gtk::ScrolledWindow {
+                                set_vexpand: true,
+
+                                #[local_ref]
+                                room_list_box -> gtk::ListBox {
+                                    add_css_class: "boxed-list",
+                                    set_selection_mode: gtk::SelectionMode::None,
+                                    set_valign: gtk::Align::Start,
+                                },
+                            },
+
+                            gtk::Label {
+                                #[watch]
+                                set_visible: model.rooms_empty_hint.is_some(),
+                                #[watch]
+                                set_label: model.rooms_empty_hint.as_deref().unwrap_or(""),
+                                add_css_class: "dim-label",
+                                set_margin_top: 24,
+                            },
+                        },
+
+                        add_named[Some("room")] = &gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            set_margin_all: 12,
+
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Button {
+                                    set_icon_name: "go-previous-symbolic",
+                                    connect_clicked => AppMsg::Back,
+                                },
+                                gtk::Label {
+                                    #[watch]
+                                    set_label: &model.active_room_name(),
+                                    add_css_class: "title-3",
+                                    set_hexpand: true,
+                                    set_halign: gtk::Align::Start,
+                                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+                                },
+                                gtk::Button {
+                                    set_label: "Load older",
+                                    #[watch]
+                                    set_sensitive: !model.loading_older,
+                                    connect_clicked => AppMsg::LoadOlder,
+                                },
+                            },
+
+                            #[name = "message_scroller"]
+                            gtk::ScrolledWindow {
+                                set_vexpand: true,
+
+                                #[local_ref]
+                                message_box -> gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    set_spacing: 6,
+                                    set_valign: gtk::Align::End,
+                                    set_margin_top: 8,
+                                    set_margin_bottom: 8,
+                                },
+                            },
+
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Entry {
+                                    set_buffer: &model.compose_buf,
+                                    set_placeholder_text: Some("Message…"),
+                                    set_hexpand: true,
+                                    connect_activate => AppMsg::Send,
+                                },
+                                gtk::Button {
+                                    set_label: "Send",
+                                    add_css_class: "suggested-action",
+                                    connect_clicked => AppMsg::Send,
+                                },
+                            },
+                        },
+
+                        add_named[Some("settings")] = &gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 16,
+                            set_margin_all: 12,
+
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Button {
+                                    set_icon_name: "go-previous-symbolic",
+                                    connect_clicked => AppMsg::Back,
+                                },
+                                gtk::Label { set_label: "Settings", add_css_class: "title-3" },
+                            },
+
+                            adw::PreferencesGroup {
+                                set_title: "Account",
+
+                                adw::ActionRow {
+                                    set_title: "Signed in as",
+                                    #[watch]
+                                    set_subtitle: model.user_id.as_deref().unwrap_or("—"),
+                                },
+                                adw::ActionRow {
+                                    set_title: "Homeserver",
+                                    #[watch]
+                                    set_subtitle: model.homeserver.as_deref().unwrap_or("—"),
+                                },
+                            },
+
+                            adw::PreferencesGroup {
+                                set_title: "Appearance",
+
+                                adw::SwitchRow {
+                                    set_title: "Dark",
+                                    #[watch]
+                                    #[block_signal(dark_handler)]
+                                    set_active: model.dark,
+                                    connect_active_notify[sender] => move |row| {
+                                        sender.input(AppMsg::ToggleTheme(row.is_active()));
+                                    } @dark_handler,
+                                },
+                            },
+
+                            gtk::Button {
+                                set_label: "Sign out",
+                                add_css_class: "destructive-action",
+                                connect_clicked => AppMsg::Logout,
+                            },
+
+                            gtk::Label {
+                                set_label: "neo — a matrix.org client built with Relm4.",
+                                add_css_class: "dim-label",
+                                set_wrap: true,
+                            },
+                        },
+
+                        // Set only after every named page above has been
+                        // added — evaluating this any earlier (e.g. as the
+                        // Stack's first property) fires before the pages
+                        // exist and GTK logs "child name not found".
+                        #[watch]
+                        set_visible_child_name: model.screen.name(),
+                    },
+                },
+            },
         }
     }
 
+    fn init(_init: Self::Init, root: Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
+        adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+
+        let (cmd_tx, mut evt_rx) = matrix_bridge::spawn();
+        let bridge_sender = sender.clone();
+        relm4::spawn(async move {
+            while let Some(evt) = evt_rx.recv().await {
+                bridge_sender.input(AppMsg::Bridge(evt));
+            }
+        });
+
+        // There's no server-push/long-poll loop in the bridge (see its module
+        // doc) — it syncs on demand, driven by this timer, same cadence for
+        // the room list and (if any) the open room's timeline.
+        let poll_tx = cmd_tx.clone();
+        relm4::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                if poll_tx.send(MatrixCmd::Poll).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let room_factory = FactoryVecDeque::builder().launch_default().forward(
+            sender.input_sender(),
+            |out| match out {
+                RoomRowOutput::Open(id) => AppMsg::OpenRoom(id),
+            },
+        );
+        let space_factory = FactoryVecDeque::builder().launch_default().forward(
+            sender.input_sender(),
+            |out| match out {
+                SpaceChipOutput::Select(id) => AppMsg::SelectSpace(id),
+            },
+        );
+        let message_factory = FactoryVecDeque::builder().launch_default().detach();
+
+        let model = AppModel {
+            cmd_tx,
+            screen: Screen::Connect,
+            dark: true,
+            homeserver_buf: gtk::EntryBuffer::new(Some("matrix.org")),
+            username_buf: gtk::EntryBuffer::default(),
+            password_buf: gtk::EntryBuffer::default(),
+            remember_me: true,
+            connection: ConnectionState::Disconnected,
+            user_id: None,
+            homeserver: None,
+            error: None,
+            sso_url: None,
+            rooms: Vec::new(),
+            room_filter_buf: gtk::EntryBuffer::default(),
+            rooms_empty_hint: Some("No rooms yet — joined rooms show up here.".to_owned()),
+            active_room: None,
+            messages: HashMap::new(),
+            loading_older: false,
+            space_children: HashMap::new(),
+            active_space: None,
+            has_spaces: false,
+            compose_buf: gtk::EntryBuffer::default(),
+            room_factory,
+            message_factory,
+            space_factory,
+            toaster: Toaster::default(),
+        };
+
+        let toast_overlay = model.toaster.overlay_widget();
+        let room_list_box = model.room_factory.widget();
+        let message_box = model.message_factory.widget();
+        let space_chip_box = model.space_factory.widget();
+
+        let widgets = view_output!();
+
+        // Keep the timeline pinned to the newest message as it grows, same
+        // as the old egui `ScrollArea::stick_to_bottom`.
+        let vadj = widgets.message_scroller.vadjustment();
+        vadj.connect_changed(move |adj| {
+            adj.set_value(adj.upper() - adj.page_size());
+        });
+
+        ComponentParts { model, widgets }
+    }
+
+    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+        match msg {
+            AppMsg::Login => {
+                self.connection = ConnectionState::Connecting;
+                self.error = None;
+                let _ = self.cmd_tx.send(MatrixCmd::Login {
+                    homeserver: self.homeserver_buf.text().trim().to_owned(),
+                    username: self.username_buf.text().trim().to_owned(),
+                    password: self.password_buf.text().to_string(),
+                    remember: self.remember_me,
+                });
+            }
+            AppMsg::Sso => {
+                self.connection = ConnectionState::Connecting;
+                self.error = None;
+                self.sso_url = None;
+                let _ = self.cmd_tx.send(MatrixCmd::LoginSso {
+                    homeserver: self.homeserver_buf.text().trim().to_owned(),
+                    remember: self.remember_me,
+                });
+            }
+            AppMsg::ReopenSso => {
+                if let Some(url) = &self.sso_url {
+                    let _ = open::that_detached(url);
+                }
+            }
+            AppMsg::CancelSso => {
+                // The bridge task may still complete in the background (it
+                // isn't cancelled) — if it does, the resulting LoggedIn
+                // event is honored normally. This just stops the UI from
+                // waiting.
+                self.connection = ConnectionState::Disconnected;
+                self.sso_url = None;
+            }
+            AppMsg::ToggleRemember(v) => self.remember_me = v,
+
+            AppMsg::FilterChanged => self.sync_room_list(),
+            AppMsg::SelectSpace(id) => {
+                self.active_space = id;
+                self.sync_room_list();
+                self.sync_space_chips();
+            }
+            AppMsg::OpenRoom(id) => {
+                self.active_room = Some(id.clone());
+                self.screen = Screen::Room;
+                self.sync_messages();
+                let _ = self.cmd_tx.send(MatrixCmd::OpenRoom(id));
+            }
+            AppMsg::OpenSettings => self.screen = Screen::Settings,
+
+            AppMsg::Back => self.screen = Screen::Rooms,
+            AppMsg::Send => {
+                let text = self.compose_buf.text().trim().to_owned();
+                if !text.is_empty() {
+                    if let Some(room_id) = self.active_room.clone() {
+                        let _ = self.cmd_tx.send(MatrixCmd::Send { room_id, text });
+                    }
+                    self.compose_buf.set_text("");
+                }
+            }
+            AppMsg::LoadOlder => {
+                if let Some(room_id) = self.active_room.clone() {
+                    self.loading_older = true;
+                    let _ = self.cmd_tx.send(MatrixCmd::LoadOlder(room_id));
+                }
+            }
+
+            AppMsg::ToggleTheme(dark) => {
+                self.dark = dark;
+                let scheme =
+                    if dark { adw::ColorScheme::ForceDark } else { adw::ColorScheme::ForceLight };
+                adw::StyleManager::default().set_color_scheme(scheme);
+            }
+            AppMsg::Logout => {
+                let _ = self.cmd_tx.send(MatrixCmd::Logout);
+            }
+
+            AppMsg::Bridge(evt) => self.handle_bridge_event(evt),
+        }
+    }
+}
+
+impl AppModel {
+    fn handle_bridge_event(&mut self, evt: MatrixEvent) {
+        match evt {
+            MatrixEvent::Connecting => {
+                self.connection = ConnectionState::Connecting;
+                self.error = None;
+            }
+            MatrixEvent::SsoUrl(url) => {
+                // Best-effort auto-open; the connect screen also shows `url`
+                // as a fallback link/"Open again" button in case there's no
+                // default browser configured (e.g. sandboxed/headless).
+                let _ = open::that_detached(&url);
+                self.sso_url = Some(url);
+            }
+            MatrixEvent::LoggedIn { user_id, homeserver } => {
+                self.connection = ConnectionState::Connected;
+                self.user_id = Some(user_id);
+                self.homeserver = Some(homeserver);
+                self.error = None;
+                self.sso_url = None;
+                self.screen = Screen::Rooms;
+                self.password_buf.set_text("");
+                self.toaster.add_toast(adw::Toast::new("Signed in"));
+            }
+            MatrixEvent::LoginFailed(err) => {
+                self.connection = ConnectionState::Disconnected;
+                self.sso_url = None;
+                self.error = Some(err);
+            }
+            MatrixEvent::Rooms { rooms, space_children } => {
+                // A space the user switched into may have been left/removed
+                // server-side by the time this poll lands — fall back to
+                // Home instead of showing an empty, unrecoverable list.
+                if let Some(active) = &self.active_space {
+                    if !space_children.contains_key(active) {
+                        self.active_space = None;
+                    }
+                }
+                self.rooms = rooms;
+                self.space_children = space_children;
+                self.sync_room_list();
+                self.sync_space_chips();
+            }
+            MatrixEvent::Timeline { room_id, messages, prepend } => {
+                self.apply_timeline(room_id, messages, prepend);
+            }
+            MatrixEvent::SendFailed { room_id: _, error } => {
+                self.toaster.add_toast(adw::Toast::new(&format!("Send failed: {error}")));
+            }
+            MatrixEvent::Error(err) => {
+                self.toaster.add_toast(adw::Toast::new(&err));
+            }
+            MatrixEvent::LoggedOut => self.reset_session(),
+        }
+    }
+
+    /// Non-space joined rooms, filtered by the search box and (if set) the
+    /// active space's local `m.space.child` membership.
+    fn filtered_rooms(&self) -> Vec<&RoomSummary> {
+        let needle = self.room_filter_buf.text().trim().to_lowercase();
+        let space_members = self.active_space.as_ref().and_then(|id| self.space_children.get(id));
+        self.rooms
+            .iter()
+            .filter(|r| !r.is_space)
+            .filter(|r| needle.is_empty() || r.name.to_lowercase().contains(&needle))
+            .filter(|r| space_members.map_or(true, |members| members.iter().any(|id| id == &r.id)))
+            .collect()
+    }
+
+    fn sync_room_list(&mut self) {
+        let rooms: Vec<RoomSummary> = self.filtered_rooms().into_iter().cloned().collect();
+        self.rooms_empty_hint = if !rooms.is_empty() {
+            None
+        } else if self.rooms.iter().any(|r| !r.is_space) {
+            Some("No rooms match your search.".to_owned())
+        } else {
+            Some("No rooms yet — joined rooms show up here.".to_owned())
+        };
+
+        let mut guard = self.room_factory.guard();
+        guard.clear();
+        for room in rooms {
+            guard.push_back(room);
+        }
+    }
+
+    fn sync_space_chips(&mut self) {
+        let spaces: Vec<&RoomSummary> = self.rooms.iter().filter(|r| r.is_space).collect();
+        self.has_spaces = !spaces.is_empty();
+
+        let mut guard = self.space_factory.guard();
+        guard.clear();
+        guard.push_back(SpaceChip {
+            id: None,
+            label: "Home".to_owned(),
+            selected: self.active_space.is_none(),
+        });
+        for space in spaces {
+            guard.push_back(SpaceChip {
+                id: Some(space.id.clone()),
+                label: space.name.clone(),
+                selected: self.active_space.as_deref() == Some(space.id.as_str()),
+            });
+        }
+    }
+
+    fn active_room_summary(&self) -> Option<&RoomSummary> {
+        let id = self.active_room.as_ref()?;
+        self.rooms.iter().find(|r| &r.id == id)
+    }
+
+    fn active_room_name(&self) -> String {
+        self.active_room_summary().map(|r| r.name.clone()).unwrap_or_else(|| "Room".to_owned())
+    }
+
     fn apply_timeline(&mut self, room_id: String, mut incoming: Vec<ChatMessage>, prepend: bool) {
-        self.state.loading_older = false;
-        let existing = self.state.messages.entry(room_id).or_default();
+        self.loading_older = false;
+        let existing = self.messages.entry(room_id.clone()).or_default();
         if prepend && !existing.is_empty() {
-            // Merge on event_id / (sender, ts, body) to avoid duplicate rows
-            // across successive fetches of the same recent window.
+            // Merge on (sender, ts, body) to avoid duplicate rows across
+            // successive fetches of the same recent window.
             let known: std::collections::HashSet<(String, i64, String)> = existing
                 .iter()
                 .map(|m| (m.sender.clone(), m.ts_millis, m.body.clone()))
@@ -112,147 +779,34 @@ impl NeoApp {
         } else {
             *existing = incoming;
         }
-    }
 
-    fn maybe_poll(&mut self) {
-        if self.state.connection != ConnectionState::Connected {
-            return;
-        }
-        if self.state.last_poll.elapsed() >= POLL_INTERVAL {
-            self.state.last_poll = Instant::now();
-            self.send(MatrixCmd::Poll);
-        }
-    }
-}
-
-impl eframe::App for NeoApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain_events(ctx);
-        self.state.expire_toasts();
-        self.maybe_poll();
-
-        if self.theme_dark != self.state.dark {
-            self.theme_dark = self.state.dark;
-            if self.state.dark { apply_dark(ctx) } else { apply_light(ctx) }
-        }
-        let theme = self.theme();
-
-        egui::CentralPanel::default().frame(theme.page_frame()).show(ctx, |ui| match self.state.screen {
-            Screen::Connect => {
-                let action = ui::connect::connect_screen(ui, &theme, &mut self.state);
-                self.handle_connect_action(action);
-            }
-            Screen::Rooms => {
-                let action = ui::rooms::rooms_screen(ui, &theme, &mut self.state);
-                self.handle_rooms_action(action);
-            }
-            Screen::Room => {
-                let action = ui::room::room_screen(ui, &theme, &mut self.state);
-                self.handle_room_action(action);
-            }
-            Screen::Settings => {
-                let action = ui::settings::settings_screen(ui, &theme, &mut self.state);
-                self.handle_settings_action(action);
-            }
-        });
-
-        self.toasts_overlay(ctx, &theme);
-
-        if self.state.connection == ConnectionState::Connected {
-            ctx.request_repaint_after(POLL_INTERVAL);
-        }
-    }
-}
-
-impl NeoApp {
-    fn handle_connect_action(&mut self, action: ConnectAction) {
-        match action {
-            ConnectAction::None => {}
-            ConnectAction::Login => {
-                self.state.connection = ConnectionState::Connecting;
-                self.state.error = None;
-                self.send(MatrixCmd::Login {
-                    homeserver: self.state.form_homeserver.trim().to_owned(),
-                    username: self.state.form_username.trim().to_owned(),
-                    password: self.state.form_password.clone(),
-                    remember: self.state.remember_me,
-                });
-            }
-            ConnectAction::Sso => {
-                self.state.connection = ConnectionState::Connecting;
-                self.state.error = None;
-                self.state.sso_url = None;
-                self.send(MatrixCmd::LoginSso {
-                    homeserver: self.state.form_homeserver.trim().to_owned(),
-                    remember: self.state.remember_me,
-                });
-            }
-            ConnectAction::CancelSso => {
-                // The bridge task may still complete in the background (it
-                // isn't cancelled) — if it does, the resulting LoggedIn event
-                // is honored normally. This just stops the UI from waiting.
-                self.state.connection = ConnectionState::Disconnected;
-                self.state.sso_url = None;
-            }
+        if self.active_room.as_deref() == Some(room_id.as_str()) {
+            self.sync_messages();
         }
     }
 
-    fn handle_rooms_action(&mut self, action: RoomsAction) {
-        match action {
-            RoomsAction::None => {}
-            RoomsAction::Open(room_id) => {
-                self.state.active_room = Some(room_id.clone());
-                self.state.screen = Screen::Room;
-                self.send(MatrixCmd::OpenRoom(room_id));
-            }
-            RoomsAction::OpenSettings => self.state.screen = Screen::Settings,
+    fn sync_messages(&mut self) {
+        let mut guard = self.message_factory.guard();
+        guard.clear();
+        let Some(room_id) = self.active_room.clone() else { return };
+        for msg in self.messages.get(&room_id).cloned().unwrap_or_default() {
+            guard.push_back(msg);
         }
     }
 
-    fn handle_room_action(&mut self, action: RoomAction) {
-        match action {
-            RoomAction::None => {}
-            RoomAction::Back => self.state.screen = Screen::Rooms,
-            RoomAction::Send(text) => {
-                if let Some(room_id) = self.state.active_room.clone() {
-                    self.send(MatrixCmd::Send { room_id, text });
-                }
-            }
-            RoomAction::LoadOlder => {
-                if let Some(room_id) = self.state.active_room.clone() {
-                    self.state.loading_older = true;
-                    self.send(MatrixCmd::LoadOlder(room_id));
-                }
-            }
-        }
-    }
-
-    fn handle_settings_action(&mut self, action: SettingsAction) {
-        match action {
-            SettingsAction::None => {}
-            SettingsAction::Back => self.state.screen = Screen::Rooms,
-            SettingsAction::ToggleTheme => self.state.dark = !self.state.dark,
-            SettingsAction::Logout => self.send(MatrixCmd::Logout),
-        }
-    }
-
-    fn toasts_overlay(&self, ctx: &egui::Context, theme: &Theme) {
-        if self.state.toasts.is_empty() {
-            return;
-        }
-        egui::Area::new(egui::Id::new("neo-toasts"))
-            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -theme.spacing.page))
-            .show(ctx, |ui| {
-                for toast in &self.state.toasts {
-                    theme.card_frame().show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(&toast.text)
-                                .size(theme.type_scale.body)
-                                .color(theme.palette.text),
-                        );
-                    });
-                    ui.add_space(theme.spacing.xs);
-                }
-            });
+    fn reset_session(&mut self) {
+        self.connection = ConnectionState::Disconnected;
+        self.user_id = None;
+        self.homeserver = None;
+        self.sso_url = None;
+        self.rooms.clear();
+        self.active_room = None;
+        self.messages.clear();
+        self.space_children.clear();
+        self.active_space = None;
+        self.screen = Screen::Connect;
+        self.sync_room_list();
+        self.sync_space_chips();
+        self.sync_messages();
     }
 }

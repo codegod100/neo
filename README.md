@@ -1,39 +1,47 @@
 # neo
 
-A [matrix.org](https://matrix.org) chat client, styled with [vidya](../vidya)
-and structured after [sleek](../sleek).
+A [matrix.org](https://matrix.org) chat client built with
+[Relm4](https://relm4.org) (GTK4 + libadwaita), following a GNOME HIG look.
 
 ## Stack
 
-- [`eframe`/`egui`](https://github.com/emilk/egui) 0.31 — immediate-mode GUI (glow backend, wayland + x11)
-- [`vidya`](../vidya) — shared GNOME/HIG-inspired egui theme (path dependency)
+- [`relm4`](https://relm4.org) 0.11 — Elm-architecture GUI framework on top of `gtk4-rs`
+  (GTK4 + libadwaita widgets, native dark/light theming via `AdwStyleManager`)
 - [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk) 0.13 — official Rust Matrix SDK
   (sqlite store, rustls, e2e-encryption + automatic room-key forwarding)
 - `tokio` — background runtime for the network bridge
 
+Building requires GTK4 and libadwaita development files (`.pc` files discoverable by
+`pkg-config`) — on distros without a system package for these,
+[Homebrew](https://brew.sh) (`brew install gtk4 libadwaita`) works too; point
+`PKG_CONFIG_PATH` at its `lib/pkgconfig` (see `.cargo/config.toml`).
+
 ## Architecture
 
-Mirrors sleek's shape:
-
-- `src/state.rs` — `AppState`, screens, room/message/toast structs. No `matrix-sdk`
-  types leak in here; room/message IDs are plain `String`s so the UI stays decoupled
-  from the network layer.
-- `src/matrix_bridge.rs` — the entire network layer. A dedicated OS thread runs its
-  own Tokio runtime driving a `matrix_sdk::Client`. The UI thread talks to it over an
-  `mpsc` channel: `MatrixCmd` in (`Login`, `LoginSso`, `Poll`, `OpenRoom`, `LoadOlder`,
-  `Send`, `Logout`), `MatrixEvent` out (`LoggedIn`, `SsoUrl`, `Rooms { rooms,
-  space_children }`, `Timeline`, ...).
+- `src/state.rs` — plain domain data shared between the bridge and the UI: `Screen`,
+  `ConnectionState`, `RoomSummary`, `ChatMessage`. No `matrix-sdk` or GTK types leak in
+  here; room/message IDs are plain `String`s so this module stays decoupled from both.
+- `src/matrix_bridge.rs` — the entire network layer, unchanged by the UI rewrite below.
+  A dedicated OS thread runs its own Tokio runtime driving a `matrix_sdk::Client`. The UI
+  talks to it over an `mpsc` channel: `MatrixCmd` in (`Login`, `LoginSso`, `Poll`,
+  `OpenRoom`, `LoadOlder`, `Send`, `Logout`), `MatrixEvent` out (`LoggedIn`, `SsoUrl`,
+  `Rooms { rooms, space_children }`, `Timeline`, ...).
   There's no continuous sync loop — the UI drives a `Poll` command every 3s while
   connected, keeping all bridge state local to one async task instead of behind shared
   mutexes. `LoginSso` is the one command that doesn't run inline: it can sit waiting on
   a browser round-trip indefinitely, so it runs in a spawned task and reports back over
   an internal channel that the main loop also `select!`s on — otherwise it would stall
   every other command until the browser flow finished.
-- `src/ui/*.rs` — one module per screen (`connect`, `rooms`, `room`, `settings`).
-  Each renders with vidya widgets and returns an `*Action` enum; `app.rs` is the only
-  place that dispatches actions into bridge commands or state mutations.
-- `src/app.rs` — owns `AppState` + the channel halves, drains bridge events each
-  frame, and wires screens together.
+- `src/app.rs` — the single `AppModel` (a Relm4 `SimpleComponent`) that owns every
+  screen's state. All four screens (connect, rooms, room, settings) live in one
+  `gtk::Stack`, built once and toggled via `set_visible_child_name` rather than
+  torn down and rebuilt on navigation — that keeps the room list and message list's
+  factory-owned widgets alive across screen switches. `init()` spawns the bridge thread
+  and a `relm4::spawn`ed task that forwards `MatrixEvent`s in as `AppMsg::Bridge`, plus
+  the timer driving `MatrixCmd::Poll`.
+- `src/factory/*.rs` — `relm4::factory` components for the dynamic lists: `RoomRow`
+  (an `adw::ActionRow` per joined room), `MessageRow` (a chat bubble per timeline
+  event), `SpaceChip` (a pill button per joined Space, plus "Home").
 
 Message history is fetched via `Room::messages()` and parsed by hand (not through
 `matrix-sdk-ui`'s `Timeline` widget) — this keeps the dependency surface and the
