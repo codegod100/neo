@@ -7,6 +7,9 @@ A [matrix.org](https://matrix.org) chat client built with
 
 - [`relm4`](https://relm4.org) 0.11 — Elm-architecture GUI framework on top of `gtk4-rs`
   (GTK4 + libadwaita widgets, native dark/light theming via `AdwStyleManager`)
+- [Blueprint](https://gnome.pages.gitlab.gnome.org/blueprint-compiler/) — declarative
+  application shell and screen layouts in `src/ui/app.blp`; the compiled `app.ui` is
+  embedded in the binary, while dynamic room/message rows remain Relm4 factories
 - [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk) 0.13 — official Rust Matrix SDK
   (sqlite store, rustls, e2e-encryption + automatic room-key forwarding)
 - `tokio` — background runtime for the network bridge
@@ -34,8 +37,9 @@ know that prefix (Homebrew's own `pkg-config` build does).
   an internal channel that the main loop also `select!`s on — otherwise it would stall
   every other command until the browser flow finished.
 - `src/app.rs` — the single `AppModel` (a Relm4 `SimpleComponent`) that owns every
-  screen's state. All four screens (connect, rooms, room, settings) live in one
-  `gtk::Stack`, built once and toggled via `set_visible_child_name` rather than
+  screen's state and connects it to the Blueprint widgets exposed by `src/ui.rs`.
+  All five screens (connect, rooms, lobby, room, settings) live in one `gtk::Stack`,
+  built once and toggled via `set_visible_child_name` rather than
   torn down and rebuilt on navigation — that keeps the room list and message list's
   factory-owned widgets alive across screen switches. `init()` spawns the bridge thread
   and a `relm4::spawn`ed task that forwards `MatrixEvent`s in as `AppMsg::Bridge`, plus
@@ -53,6 +57,14 @@ read-receipts for free.
 
 ```sh
 buck2 run //:neo
+```
+
+The application layout is authored in `src/ui/app.blp`. After changing it,
+regenerate the checked-in Builder XML and validate the Buck target:
+
+```sh
+blueprint-compiler compile --output src/ui/app.ui src/ui/app.blp
+buck2 build //:blueprint-ui
 ```
 
 See "Building with buck2" below for how the crate graph — neo's own code plus

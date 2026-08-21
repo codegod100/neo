@@ -64,9 +64,22 @@ DEPS = [
     "//third-party:url",
 ]
 
+# Validates the authoritative Blueprint source and produces the same Builder XML
+# checked in at `src/ui/app.ui`. The checked-in copy is what `include_str!` embeds
+# because Buck's Rust rule does not preserve a genrule output beside `src/ui.rs`
+# for relative include paths.
+genrule(
+    name = "blueprint-ui",
+    srcs = ["src/ui/app.blp"],
+    out = "app.ui",
+    cmd = "blueprint-compiler compile --output $OUT $SRCS",
+)
+
 rust_binary(
     name = "neo",
-    srcs = glob(["src/**/*.rs"]),
+    # `app.ui` is generated from `app.blp` with blueprint-compiler and read by
+    # `src/ui.rs` through include_str!, so it must be an explicit sandbox input.
+    srcs = glob(["src/**/*.rs"]) + ["src/ui/app.ui"],
     crate = "neo",
     crate_root = "src/main.rs",
     edition = "2021",
@@ -86,7 +99,7 @@ rust_binary(
 # real dev-dependency.
 rust_test(
     name = "neo-test",
-    srcs = glob(["src/**/*.rs"]),
+    srcs = glob(["src/**/*.rs"]) + ["src/ui/app.ui"],
     crate = "neo",
     crate_root = "src/main.rs",
     edition = "2021",

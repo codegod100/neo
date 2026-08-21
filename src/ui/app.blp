@@ -1,0 +1,407 @@
+using Gtk 4.0;
+using Adw 1;
+
+Box app_content {
+  orientation: vertical;
+
+  Adw.HeaderBar {
+    title-widget: Adw.WindowTitle window_title {
+      title: "neo";
+    };
+  }
+
+  Box {
+    orientation: horizontal;
+    vexpand: true;
+
+    ScrolledWindow space_rail {
+      visible: false;
+      hscrollbar-policy: never;
+      vscrollbar-policy: never;
+      width-request: 72;
+
+      child: Box space_mount {
+        orientation: vertical;
+        spacing: 6;
+        margin-top: 8;
+        margin-bottom: 8;
+        margin-start: 8;
+        margin-end: 8;
+      };
+    }
+
+    Stack screen_stack {
+      hexpand: true;
+      vexpand: true;
+      transition-type: crossfade;
+
+      StackPage {
+        name: "connect";
+        child: ScrolledWindow {
+          vexpand: true;
+
+          child: Box {
+            orientation: vertical;
+            spacing: 16;
+            margin-top: 24;
+            margin-bottom: 24;
+            margin-start: 24;
+            margin-end: 24;
+            valign: center;
+            halign: center;
+            width-request: 360;
+
+            Label {
+              label: "neo";
+              styles ["title-1"]
+            }
+            Label {
+              label: "A matrix.org client.";
+              styles ["dim-label"]
+            }
+
+            Box sso_waiting {
+              orientation: vertical;
+              spacing: 12;
+              visible: false;
+
+              Label {
+                label: "Continue in your browser";
+                styles ["title-3"]
+              }
+              Label {
+                label: "We opened your homeserver’s sign-in page. Waiting for it to finish…";
+                wrap: true;
+                styles ["dim-label"]
+              }
+              Spinner {
+                spinning: true;
+                halign: center;
+              }
+              Label sso_url {
+                wrap: true;
+                selectable: true;
+                styles ["caption", "dim-label"]
+              }
+              Box {
+                orientation: horizontal;
+                spacing: 8;
+                halign: center;
+
+                Button reopen_sso {
+                  label: "Open again";
+                }
+                Button cancel_sso {
+                  label: "Cancel";
+                }
+              }
+            }
+
+            Box login_form {
+              orientation: vertical;
+              spacing: 12;
+
+              Label login_error {
+                visible: false;
+                wrap: true;
+                styles ["error"]
+              }
+
+              Adw.PreferencesGroup {
+                title: "Sign in";
+                description: "Your homeserver account — the same one Element uses.";
+
+                Adw.ActionRow {
+                  title: "Homeserver";
+                  [suffix]
+                  Entry homeserver_entry {
+                    valign: center;
+                    hexpand: true;
+                  }
+                }
+                Adw.ActionRow {
+                  title: "Username";
+                  [suffix]
+                  Entry username_entry {
+                    valign: center;
+                    hexpand: true;
+                  }
+                }
+                Adw.ActionRow {
+                  title: "Password";
+                  [suffix]
+                  Entry password_entry {
+                    visibility: false;
+                    input-purpose: password;
+                    valign: center;
+                    hexpand: true;
+                  }
+                }
+                Adw.SwitchRow remember_switch {
+                  title: "Remember me on this device";
+                  active: true;
+                }
+              }
+
+              Button login_button {
+                label: "Sign in";
+                styles ["suggested-action", "pill"]
+              }
+              Label {
+                label: "— or —";
+                halign: center;
+                styles ["dim-label"]
+              }
+              Button sso_button {
+                label: "Sign in with SSO";
+                styles ["pill"]
+              }
+              Label {
+                label: "Login only — registration isn’t supported yet. Passwords go straight to your homeserver over HTTPS and are never stored by neo unless you remember this device.";
+                wrap: true;
+                styles ["caption", "dim-label"]
+              }
+            }
+          };
+        };
+      }
+
+      StackPage {
+        name: "rooms";
+        child: Box {
+          orientation: vertical;
+          spacing: 8;
+          margin-top: 12;
+          margin-bottom: 12;
+          margin-start: 12;
+          margin-end: 12;
+          hexpand: true;
+
+          Box {
+            orientation: horizontal;
+            spacing: 8;
+
+            Label rooms_user {
+              hexpand: true;
+              halign: start;
+              ellipsize: middle;
+              styles ["dim-label"]
+            }
+            Button settings_button {
+              icon-name: "emblem-system-symbolic";
+              tooltip-text: "Settings";
+            }
+          }
+          Entry room_filter {
+            placeholder-text: "Search rooms…";
+            primary-icon-name: "system-search-symbolic";
+          }
+          Button lobby_button {
+            label: "Lobby";
+            halign: start;
+            visible: false;
+            styles ["flat"]
+          }
+          ScrolledWindow {
+            vexpand: true;
+            child: Box room_mount {
+              orientation: vertical;
+            };
+          }
+          Label rooms_empty {
+            visible: false;
+            margin-top: 24;
+            styles ["dim-label"]
+          }
+        };
+      }
+
+      StackPage {
+        name: "lobby";
+        child: Box {
+          orientation: vertical;
+          spacing: 8;
+          margin-top: 12;
+          margin-bottom: 12;
+          margin-start: 12;
+          margin-end: 12;
+
+          Box {
+            orientation: horizontal;
+            spacing: 8;
+            Button lobby_back {
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Back";
+            }
+            Label {
+              label: "Lobby";
+              hexpand: true;
+              halign: start;
+              styles ["title-3"]
+            }
+          }
+          Stack lobby_stack {
+            vexpand: true;
+            transition-type: crossfade;
+            StackPage {
+              name: "loading";
+              child: Box {
+                orientation: vertical;
+                spacing: 12;
+                valign: center;
+                halign: center;
+                Spinner { spinning: true; }
+                Label {
+                  label: "Loading directory…";
+                  styles ["dim-label"]
+                }
+              };
+            }
+            StackPage {
+              name: "rooms";
+              child: ScrolledWindow {
+                vexpand: true;
+                child: Box lobby_mount {
+                  orientation: vertical;
+                };
+              };
+            }
+          }
+          Label lobby_empty {
+            label: "No rooms in this space’s directory.";
+            visible: false;
+            margin-top: 24;
+            styles ["dim-label"]
+          }
+        };
+      }
+
+      StackPage {
+        name: "room";
+        child: Box {
+          orientation: vertical;
+          spacing: 8;
+          margin-top: 12;
+          margin-bottom: 12;
+          margin-start: 12;
+          margin-end: 12;
+
+          Box {
+            orientation: horizontal;
+            spacing: 8;
+            Button room_back {
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Back";
+            }
+            Box {
+              orientation: vertical;
+              hexpand: true;
+              valign: center;
+              Label room_name {
+                halign: start;
+                ellipsize: end;
+                styles ["title-3"]
+              }
+              Label room_address {
+                halign: start;
+                ellipsize: end;
+                selectable: true;
+                styles ["dim-label", "caption"]
+              }
+            }
+          }
+          Stack message_stack {
+            vexpand: true;
+            transition-type: crossfade;
+            StackPage {
+              name: "loading";
+              child: Box {
+                orientation: vertical;
+                spacing: 12;
+                valign: center;
+                halign: center;
+                Spinner { spinning: true; }
+                Label {
+                  label: "Loading messages…";
+                  styles ["dim-label"]
+                }
+              };
+            }
+            StackPage {
+              name: "messages";
+              child: ScrolledWindow message_scroller {
+                child: Box message_mount {
+                  orientation: vertical;
+                };
+              };
+            }
+          }
+          Box {
+            orientation: horizontal;
+            spacing: 8;
+            Entry compose_entry {
+              placeholder-text: "Message…";
+              hexpand: true;
+            }
+            Button send_button {
+              label: "Send";
+              styles ["suggested-action"]
+            }
+          }
+        };
+      }
+
+      StackPage {
+        name: "settings";
+        child: Box {
+          orientation: vertical;
+          spacing: 16;
+          margin-top: 12;
+          margin-bottom: 12;
+          margin-start: 12;
+          margin-end: 12;
+
+          Box {
+            orientation: horizontal;
+            spacing: 8;
+            Button settings_back {
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Back";
+            }
+            Label {
+              label: "Settings";
+              styles ["title-3"]
+            }
+          }
+          Adw.PreferencesGroup {
+            title: "Account";
+            Adw.ActionRow settings_user {
+              title: "Signed in as";
+              subtitle: "—";
+            }
+            Adw.ActionRow settings_homeserver {
+              title: "Homeserver";
+              subtitle: "—";
+            }
+          }
+          Adw.PreferencesGroup {
+            title: "Appearance";
+            Adw.SwitchRow dark_switch {
+              title: "Dark";
+              active: true;
+            }
+          }
+          Button logout_button {
+            label: "Sign out";
+            styles ["destructive-action"]
+          }
+          Label {
+            label: "neo — a matrix.org client built with Relm4.";
+            wrap: true;
+            styles ["dim-label"]
+          }
+        };
+      }
+    }
+  }
+}

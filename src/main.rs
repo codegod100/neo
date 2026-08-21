@@ -6,6 +6,7 @@ mod app;
 mod factory;
 mod matrix_bridge;
 mod state;
+mod ui;
 
 use relm4::RelmApp;
 
