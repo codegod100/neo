@@ -167,9 +167,40 @@ impl SimpleComponent for AppModel {
                         },
                     },
 
-                    gtk::Stack {
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
                         set_vexpand: true,
-                        set_transition_type: gtk::StackTransitionType::Crossfade,
+
+                        // Space rail: persistent across every screen — not
+                        // just the room list — so switching into a channel
+                        // (or into settings/the lobby) no longer hides it.
+                        // Fixed-width and scrolls vertically, so its
+                        // footprint never grows with the number or length
+                        // of the user's spaces.
+                        gtk::ScrolledWindow {
+                            #[watch]
+                            set_visible: model.has_spaces,
+                            set_hscrollbar_policy: gtk::PolicyType::Never,
+                            // GTK4's overlay scrollbar draws over the rail
+                            // instead of reserving its own space — fine for
+                            // a tall message list, not for a narrow avatar
+                            // column. Hidden here; the rail still scrolls
+                            // fine with wheel/trackpad.
+                            set_vscrollbar_policy: gtk::PolicyType::Never,
+                            set_width_request: 64,
+
+                            #[local_ref]
+                            space_chip_box -> gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_spacing: 6,
+                                set_margin_all: 8,
+                            },
+                        },
+
+                        gtk::Stack {
+                            set_vexpand: true,
+                            set_hexpand: true,
+                            set_transition_type: gtk::StackTransitionType::Crossfade,
 
                         add_named[Some("connect")] = &gtk::ScrolledWindow {
                             set_vexpand: true,
@@ -339,95 +370,67 @@ impl SimpleComponent for AppModel {
                         },
 
                         add_named[Some("rooms")] = &gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-
-                            // Space rail: fixed-width, scrolls vertically —
-                            // its footprint never grows with the number or
-                            // length of the user's spaces, so it can't force
-                            // the window wider than a phone screen.
-                            gtk::ScrolledWindow {
-                                #[watch]
-                                set_visible: model.has_spaces,
-                                set_hscrollbar_policy: gtk::PolicyType::Never,
-                                // GTK4's overlay scrollbar draws over the
-                                // rail instead of reserving its own space —
-                                // fine for a tall message list, not for a
-                                // narrow avatar column. Hidden here; the
-                                // rail still scrolls fine with wheel/trackpad.
-                                set_vscrollbar_policy: gtk::PolicyType::Never,
-                                set_width_request: 64,
-
-                                #[local_ref]
-                                space_chip_box -> gtk::Box {
-                                    set_orientation: gtk::Orientation::Vertical,
-                                    set_spacing: 6,
-                                    set_margin_all: 8,
-                                },
-                            },
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            set_margin_all: 12,
+                            set_hexpand: true,
 
                             gtk::Box {
-                                set_orientation: gtk::Orientation::Vertical,
+                                set_orientation: gtk::Orientation::Horizontal,
                                 set_spacing: 8,
-                                set_margin_all: 12,
-                                set_hexpand: true,
-
-                                gtk::Box {
-                                    set_orientation: gtk::Orientation::Horizontal,
-                                    set_spacing: 8,
-
-                                    gtk::Label {
-                                        #[watch]
-                                        set_label: model.user_id.as_deref().unwrap_or(""),
-                                        add_css_class: "dim-label",
-                                        set_hexpand: true,
-                                        set_halign: gtk::Align::Start,
-                                        set_ellipsize: gtk::pango::EllipsizeMode::Middle,
-                                    },
-                                    gtk::Button {
-                                        set_icon_name: "emblem-system-symbolic",
-                                        set_tooltip_text: Some("Settings"),
-                                        connect_clicked => AppMsg::OpenSettings,
-                                    },
-                                },
-
-                                gtk::Entry {
-                                    set_buffer: &model.room_filter_buf,
-                                    set_placeholder_text: Some("Search rooms…"),
-                                    set_primary_icon_name: Some("system-search-symbolic"),
-                                    connect_changed => AppMsg::FilterChanged,
-                                },
-
-                                // Directory of every room the active space
-                                // advertises (joined or not) — in addition to
-                                // the joined channels listed below.
-                                gtk::Button {
-                                    set_label: "Lobby",
-                                    add_css_class: "flat",
-                                    set_halign: gtk::Align::Start,
-                                    #[watch]
-                                    set_visible: model.active_space.is_some(),
-                                    connect_clicked => AppMsg::OpenLobby,
-                                },
-
-                                gtk::ScrolledWindow {
-                                    set_vexpand: true,
-
-                                    #[local_ref]
-                                    room_list_box -> gtk::ListBox {
-                                        add_css_class: "boxed-list",
-                                        set_selection_mode: gtk::SelectionMode::None,
-                                        set_valign: gtk::Align::Start,
-                                    },
-                                },
 
                                 gtk::Label {
                                     #[watch]
-                                    set_visible: model.rooms_empty_hint.is_some(),
-                                    #[watch]
-                                    set_label: model.rooms_empty_hint.as_deref().unwrap_or(""),
+                                    set_label: model.user_id.as_deref().unwrap_or(""),
                                     add_css_class: "dim-label",
-                                    set_margin_top: 24,
+                                    set_hexpand: true,
+                                    set_halign: gtk::Align::Start,
+                                    set_ellipsize: gtk::pango::EllipsizeMode::Middle,
                                 },
+                                gtk::Button {
+                                    set_icon_name: "emblem-system-symbolic",
+                                    set_tooltip_text: Some("Settings"),
+                                    connect_clicked => AppMsg::OpenSettings,
+                                },
+                            },
+
+                            gtk::Entry {
+                                set_buffer: &model.room_filter_buf,
+                                set_placeholder_text: Some("Search rooms…"),
+                                set_primary_icon_name: Some("system-search-symbolic"),
+                                connect_changed => AppMsg::FilterChanged,
+                            },
+
+                            // Directory of every room the active space
+                            // advertises (joined or not) — in addition to
+                            // the joined channels listed below.
+                            gtk::Button {
+                                set_label: "Lobby",
+                                add_css_class: "flat",
+                                set_halign: gtk::Align::Start,
+                                #[watch]
+                                set_visible: model.active_space.is_some(),
+                                connect_clicked => AppMsg::OpenLobby,
+                            },
+
+                            gtk::ScrolledWindow {
+                                set_vexpand: true,
+
+                                #[local_ref]
+                                room_list_box -> gtk::ListBox {
+                                    add_css_class: "boxed-list",
+                                    set_selection_mode: gtk::SelectionMode::None,
+                                    set_valign: gtk::Align::Start,
+                                },
+                            },
+
+                            gtk::Label {
+                                #[watch]
+                                set_visible: model.rooms_empty_hint.is_some(),
+                                #[watch]
+                                set_label: model.rooms_empty_hint.as_deref().unwrap_or(""),
+                                add_css_class: "dim-label",
+                                set_margin_top: 24,
                             },
                         },
 
@@ -637,6 +640,7 @@ impl SimpleComponent for AppModel {
                         // exist and GTK logs "child name not found".
                         #[watch]
                         set_visible_child_name: model.screen.name(),
+                        },
                     },
                 },
             },
