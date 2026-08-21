@@ -16,7 +16,7 @@ use relm4::prelude::*;
 use crate::factory::lobby_row::{LobbyRoomRow, LobbyRoomRowOutput};
 use crate::factory::message_row::MessageRow;
 use crate::factory::room_row::{RoomRow, RoomRowOutput};
-use crate::factory::space_chip::{SpaceChip, SpaceChipOutput};
+use crate::factory::space_chip::{SpaceChip, SpaceChipInput, SpaceChipOutput};
 use crate::matrix_bridge::{self, MatrixCmd, MatrixEvent};
 use crate::state::{ChatMessage, ConnectionState, LobbyRoom, RoomSummary, Screen};
 
@@ -78,6 +78,14 @@ pub struct AppModel {
     space_children: HashMap<String, Vec<String>>,
     active_space: Option<String>,
     has_spaces: bool,
+    /// Identity (id, label, avatar) of what's currently rendered in
+    /// `space_factory`, in the same order — diffed against on every sync so
+    /// an update that doesn't actually add/remove/rename a space just
+    /// toggles `selected` on the existing chips in place, rather than
+    /// tearing the whole list down and rebuilding it. Rebuilding would
+    /// destroy the GTK button you just clicked and recreate a new one,
+    /// dropping keyboard focus off it.
+    space_chip_shape: Vec<(Option<String>, String, Option<Vec<u8>>)>,
 
     // --- Lobby (a space's full room directory, joined + not) ---
     lobby_space: Option<String>,
@@ -697,6 +705,7 @@ impl SimpleComponent for AppModel {
             lobby_space: None,
             lobby_rooms: Vec::new(),
             loading_lobby: false,
+            space_chip_shape: Vec::new(),
             compose_buf: gtk::EntryBuffer::default(),
             room_factory,
             message_factory,
@@ -970,22 +979,37 @@ impl AppModel {
         let spaces: Vec<&RoomSummary> = self.rooms.iter().filter(|r| r.is_space).collect();
         self.has_spaces = !spaces.is_empty();
 
+        let mut shape: Vec<(Option<String>, String, Option<Vec<u8>>)> =
+            Vec::with_capacity(spaces.len() + 1);
+        shape.push((None, "Home".to_owned(), None));
+        for space in &spaces {
+            shape.push((Some(space.id.clone()), space.name.clone(), space.avatar.clone()));
+        }
+
+        if shape == self.space_chip_shape {
+            // Same chips as last render — just move the highlight, in place,
+            // so a click doesn't destroy and recreate the button underneath
+            // it (which would drop keyboard focus off whichever space you
+            // just picked).
+            for (i, (id, _, _)) in shape.iter().enumerate() {
+                let selected = self.active_space.as_ref() == id.as_ref();
+                self.space_factory.send(i, SpaceChipInput::SetSelected(selected));
+            }
+            return;
+        }
+
         let mut guard = self.space_factory.guard();
         guard.clear();
-        guard.push_back(SpaceChip {
-            id: None,
-            label: "Home".to_owned(),
-            avatar: None,
-            selected: self.active_space.is_none(),
-        });
-        for space in spaces {
+        for (id, label, avatar) in &shape {
             guard.push_back(SpaceChip {
-                id: Some(space.id.clone()),
-                label: space.name.clone(),
-                avatar: space.avatar.clone(),
-                selected: self.active_space.as_deref() == Some(space.id.as_str()),
+                id: id.clone(),
+                label: label.clone(),
+                avatar: avatar.clone(),
+                selected: self.active_space.as_ref() == id.as_ref(),
             });
         }
+        drop(guard);
+        self.space_chip_shape = shape;
     }
 
     /// Switches to the Room screen and (re)subscribes to `id`'s live
