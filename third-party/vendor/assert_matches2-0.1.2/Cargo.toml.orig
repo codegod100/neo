@@ -1,0 +1,10 @@
+[package]
+name = "assert_matches2"
+version = "0.1.2"
+edition = "2021"
+license = "MPL-2.0"
+description = "A version of the assert_matches! macro that brings variables from the pattern into scope"
+repository = "https://codeberg.org/jplatte/assert_matches2"
+
+[dev-dependencies]
+serde_json = "1.0.108"

@@ -21,8 +21,8 @@
 # anywhere useful on this machine (GTK4/libadwaita only exist under
 # Homebrew's non-standard Cellar paths, not a linker default dir) - `-l`
 # embedding doesn't carry `-L` along with it, so the actual link step below
-# needs those search paths passed explicitly (same trick as `.cargo/
-# config.toml`'s PKG_CONFIG_PATH, just for the linker instead of pkg-config).
+# needs those search paths passed explicitly (pkg-config itself doesn't need
+# this on this machine - see README.md's "Building" section on why).
 GTK4_LIB_DIRS = [
     "-L/home/linuxbrew/.linuxbrew/lib",
     "-L/home/linuxbrew/.linuxbrew/Cellar/libadwaita/1.9.3/lib",
@@ -41,6 +41,28 @@ GTK4_LIB_DIRS = [
 # only debuginfo, LTO, etc are left at rustc's stock settings here).
 RUSTC_RELEASE_FLAGS = ["-Copt-level=3"] if read_root_config("neo", "release", "false") == "true" else []
 
+# Shared between `:neo` and `:neo-test` below (must mirror Cargo.toml's
+# [dependencies] exactly - `:neo-test` compiles the same crate_root, so a dep
+# missing here fails *both* targets, not just one, the same way a missing
+# `cargo` dependency would fail `cargo build`/`cargo test` alike).
+DEPS = [
+    "//third-party:anyhow",
+    "//third-party:chrono",
+    "//third-party:dirs",
+    "//third-party:env_logger",
+    "//third-party:eyeball-im",
+    "//third-party:futures-util",
+    "//third-party:log",
+    "//third-party:matrix-sdk",
+    "//third-party:matrix-sdk-ui",
+    "//third-party:open",
+    "//third-party:relm4",
+    "//third-party:serde",
+    "//third-party:serde_json",
+    "//third-party:tokio",
+    "//third-party:url",
+]
+
 rust_binary(
     name = "neo",
     srcs = glob(["src/**/*.rs"]),
@@ -49,18 +71,24 @@ rust_binary(
     edition = "2021",
     rustc_flags = GTK4_LIB_DIRS + RUSTC_RELEASE_FLAGS,
     visibility = ["PUBLIC"],
-    deps = [
-        "//third-party:anyhow",
-        "//third-party:chrono",
-        "//third-party:dirs",
-        "//third-party:env_logger",
-        "//third-party:log",
-        "//third-party:matrix-sdk",
-        "//third-party:open",
-        "//third-party:relm4",
-        "//third-party:serde",
-        "//third-party:serde_json",
-        "//third-party:tokio",
-        "//third-party:url",
-    ],
+    deps = DEPS,
+)
+
+# `buck2 test //:neo-test` - replaces `cargo test`. Same crate_root/srcs as
+# `:neo` above (mirrors how `cargo test` recompiles a bin target with a
+# `--test` harness rather than using a separate crate) plus `wiremock`, whose
+# `#[cfg(test)] mod tests` in src/matrix_bridge.rs are the only tests in the
+# crate today. `wiremock` isn't listed in `DEPS` above because it's a normal
+# (not dev-) dependency purely for reindeer/buck2 target-kind reasons - see
+# Cargo.toml's comment on it and on matrix-sdk's `testing` feature - it's
+# still only ever *used* from #[cfg(test)] code, same as it would be as a
+# real dev-dependency.
+rust_test(
+    name = "neo-test",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "neo",
+    crate_root = "src/main.rs",
+    edition = "2021",
+    rustc_flags = GTK4_LIB_DIRS,
+    deps = DEPS + ["//third-party:wiremock"],
 )

@@ -1,10 +1,11 @@
 ##
 ## Reindeer config for neo's Cargo.toml.
 ##
-## Vendors + buckifies Cargo.lock's transitive dependency graph (relm4/gtk4-rs
-## on one side, matrix-sdk on the other) into third-party/BUCK as native
-## rust_library targets, replacing `cargo build`/`cargo run` with a real buck2
-## target (see root BUCK) for the desktop dev flow.
+## Cargo.toml/Cargo.lock are only reindeer's input here - this repo has no
+## cargo build/run/test workflow. Vendors + buckifies Cargo.lock's transitive
+## dependency graph (relm4/gtk4-rs on one side, matrix-sdk on the other) into
+## third-party/BUCK as native rust_library/rust_test targets, which is the
+## only build for the desktop dev flow (see root BUCK).
 ##
 ## Re-run `reindeer vendor` (if Cargo.lock changed) then `reindeer buckify`
 ## after any Cargo.toml/Cargo.lock edit - third-party/BUCK is generated, not

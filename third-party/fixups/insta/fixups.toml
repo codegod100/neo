@@ -1,0 +1,6 @@
+# src/redaction.rs's `#[derive(Parser)] #[grammar = "select_grammar.pest"]`
+# (pest_derive) reads select_grammar.pest at proc-macro expansion time -
+# reindeer's default srcs detection only follows `include!`-style macros in
+# .rs files, not a proc-macro attribute pointing at a sibling file, so this
+# never gets picked up on its own.
+extra_srcs = ["src/select_grammar.pest"]
