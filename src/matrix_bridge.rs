@@ -40,17 +40,18 @@ use eyeball_im::Vector;
 use futures_util::{pin_mut, StreamExt};
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::deserialized_responses::SyncOrStrippedState;
-use matrix_sdk::media::{MediaFormat, MediaThumbnailSettings};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
 use matrix_sdk::ruma::api::client::sync::sync_events::v5::request::ListFilters;
 use matrix_sdk::ruma::directory::RoomTypeFilter;
 use matrix_sdk::ruma::events::room::message::{MessageType, RoomMessageEventContent};
+use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::{StateEventType, SyncStateEvent};
-use matrix_sdk::ruma::{uint, RoomId};
+use matrix_sdk::ruma::{uint, MxcUri, OwnedMxcUri, RoomId};
 use matrix_sdk::sliding_sync::{SlidingSyncList, SlidingSyncMode, Version};
 use matrix_sdk::{Client, Room};
 use matrix_sdk_ui::sync_service::SyncService;
-use matrix_sdk_ui::timeline::{RoomExt, Timeline, TimelineItem};
+use matrix_sdk_ui::timeline::{RoomExt, Timeline, TimelineDetails, TimelineItem};
 use matrix_sdk_ui::room_list_service::filters;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -196,13 +197,14 @@ impl ActiveSync {
             }
         };
         let (initial, diff_stream) = timeline.subscribe().await;
+        let client_for_avatars = timeline.room().client();
         self.active_timeline = Some(timeline);
 
         self.timeline_task = Some(tokio::spawn(async move {
             let mut items = initial;
             let _ = evt_tx.send(MatrixEvent::Timeline {
                 room_id: room_id.clone(),
-                messages: flatten_chat_messages(&items),
+                messages: flatten_chat_messages(&items, &client_for_avatars).await,
             });
 
             pin_mut!(diff_stream);
@@ -212,7 +214,7 @@ impl ActiveSync {
                 }
                 let _ = evt_tx.send(MatrixEvent::Timeline {
                     room_id: room_id.clone(),
-                    messages: flatten_chat_messages(&items),
+                    messages: flatten_chat_messages(&items, &client_for_avatars).await,
                 });
             }
         }));
@@ -541,26 +543,77 @@ async fn space_child_room_ids(space: &Room) -> Vec<String> {
         .collect()
 }
 
-fn flatten_chat_messages(items: &Vector<Arc<TimelineItem>>) -> Vec<ChatMessage> {
-    items.iter().filter_map(|item| to_chat_message(item)).collect()
+async fn flatten_chat_messages(items: &Vector<Arc<TimelineItem>>, client: &Client) -> Vec<ChatMessage> {
+    // Cache avatar downloads by mxc URI for the duration of this one flatten
+    // pass, so a room with many messages from the same sender only awaits
+    // the fetch once per diff — the SDK's own media cache (`use_cache: true`
+    // in `sender_avatar`) keeps repeat calls *across* diffs cheap too.
+    let mut avatar_cache: HashMap<OwnedMxcUri, Option<Vec<u8>>> = HashMap::new();
+    let mut out = Vec::with_capacity(items.len());
+    for item in items.iter() {
+        if let Some(msg) = to_chat_message(item, client, &mut avatar_cache).await {
+            out.push(msg);
+        }
+    }
+    out
 }
 
 /// `None` for anything that isn't a rendered `m.room.message` (day dividers,
 /// read markers, redactions, reactions, unsupported msgtypes are skipped
 /// rather than shown as raw JSON) — same behavior as the old classic-sync
 /// `message_body`, just sourced from a `TimelineItem` instead of a raw event.
-fn to_chat_message(item: &TimelineItem) -> Option<ChatMessage> {
+async fn to_chat_message(
+    item: &TimelineItem,
+    client: &Client,
+    avatar_cache: &mut HashMap<OwnedMxcUri, Option<Vec<u8>>>,
+) -> Option<ChatMessage> {
     let event = item.as_event()?;
     let msg = event.content().as_message()?;
+
+    // The timeline fills this in lazily from room member state, so it's
+    // `Ready` once the sender's `m.room.member` event has been seen (usually
+    // already true after the initial sync) and `Unavailable`/`Pending`
+    // briefly before that — fall back to the raw MXID/no avatar until then.
+    let profile = match event.sender_profile() {
+        TimelineDetails::Ready(profile) => Some(profile),
+        _ => None,
+    };
+    let display_name = profile.and_then(|p| p.display_name.clone());
+    let avatar = match profile.and_then(|p| p.avatar_url.as_deref()) {
+        Some(url) => sender_avatar(client, url, avatar_cache).await,
+        None => None,
+    };
+
     Some(ChatMessage {
         event_id: event.event_id().map(|id| id.to_string()),
         sender: event.sender().to_string(),
+        display_name,
+        avatar,
         body: message_body_text(msg.msgtype(), event.sender().localpart()),
         ts_millis: event.timestamp().0.into(),
         own: event.is_own(),
         pending: event.is_local_echo()
             && !matches!(event.send_state(), Some(matrix_sdk_ui::timeline::EventSendState::Sent { .. })),
     })
+}
+
+/// Small thumbnail of a message sender's avatar, sized for the timeline row.
+/// `avatar_cache` dedupes repeat senders within one `flatten_chat_messages`
+/// call; `get_media_content`'s own `use_cache: true` (matching `room.avatar`
+/// above) makes repeat calls across separate calls cheap too.
+async fn sender_avatar(
+    client: &Client,
+    avatar_url: &MxcUri,
+    avatar_cache: &mut HashMap<OwnedMxcUri, Option<Vec<u8>>>,
+) -> Option<Vec<u8>> {
+    if let Some(cached) = avatar_cache.get(avatar_url) {
+        return cached.clone();
+    }
+    let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(32), uint!(32)));
+    let request = MediaRequestParameters { source: MediaSource::Plain(avatar_url.to_owned()), format };
+    let bytes = client.media().get_media_content(&request, true).await.ok();
+    avatar_cache.insert(avatar_url.to_owned(), bytes.clone());
+    bytes
 }
 
 fn message_body_text(msgtype: &MessageType, sender_localpart: &str) -> String {

@@ -63,6 +63,12 @@ pub struct RoomSummary {
 pub struct ChatMessage {
     pub event_id: Option<String>,
     pub sender: String,
+    /// The sender's room display name, if their member event has been seen
+    /// yet. Falls back to `sender` (the raw MXID) when unavailable.
+    pub display_name: Option<String>,
+    /// Raw bytes of the sender's avatar thumbnail, if they have one set and
+    /// it's been fetched. See `matrix_bridge::sender_avatar`.
+    pub avatar: Option<Vec<u8>>,
     pub body: String,
     pub ts_millis: i64,
     pub own: bool,

@@ -1,8 +1,9 @@
 //! One chat bubble in the room timeline.
 
-use gtk::prelude::*;
+use adw::prelude::*;
+use gtk::{gdk, glib};
 use relm4::factory::{FactoryComponent, FactorySender};
-use relm4::gtk;
+use relm4::{adw, gtk};
 
 use crate::state::ChatMessage;
 
@@ -31,9 +32,17 @@ impl FactoryComponent for MessageRow {
                 set_spacing: 6,
                 set_halign: if self.msg.own { gtk::Align::End } else { gtk::Align::Start },
 
+                adw::Avatar {
+                    set_visible: !self.msg.own,
+                    set_size: 20,
+                    set_text: Some(self.display_name()),
+                    set_show_initials: true,
+                    set_custom_image: self.texture().as_ref(),
+                },
+
                 gtk::Label {
                     set_visible: !self.msg.own,
-                    set_label: &self.msg.sender,
+                    set_label: self.display_name(),
                     add_css_class: "caption-heading",
                     add_css_class: "accent",
                     set_halign: gtk::Align::Start,
@@ -74,6 +83,21 @@ impl FactoryComponent for MessageRow {
 
     fn init_model(msg: Self::Init, _index: &relm4::factory::DynamicIndex, _sender: FactorySender<Self>) -> Self {
         Self { msg }
+    }
+}
+
+impl MessageRow {
+    /// The sender's room display name, falling back to their raw MXID when
+    /// the member event hasn't been seen yet.
+    fn display_name(&self) -> &str {
+        self.msg.display_name.as_deref().unwrap_or(&self.msg.sender)
+    }
+
+    /// Decodes the sender's avatar thumbnail into a paintable, if one was
+    /// fetched for this message.
+    fn texture(&self) -> Option<gdk::Texture> {
+        let bytes = self.msg.avatar.as_ref()?;
+        gdk::Texture::from_bytes(&glib::Bytes::from(bytes)).ok()
     }
 }
 
