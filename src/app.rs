@@ -822,6 +822,13 @@ impl SimpleComponent for AppModel {
                 self.active_space = id;
                 self.sync_room_list();
                 self.sync_space_chips();
+                // The rail stays visible while viewing a channel, so picking
+                // a different space from there should land you on that
+                // space's channel list — not leave you staring at the old
+                // channel while the list re-filters behind it.
+                if self.screen == Screen::Room {
+                    self.screen = Screen::Rooms;
+                }
             }
             AppMsg::OpenRoom(id) => self.open_room(id),
             AppMsg::OpenSettings => self.screen = Screen::Settings,
