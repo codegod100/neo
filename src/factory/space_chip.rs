@@ -44,7 +44,7 @@ impl FactoryComponent for SpaceChip {
             set_halign: gtk::Align::Center,
 
             adw::Avatar {
-                set_size: 40,
+                set_size: 48,
                 set_text: Some(&self.label),
                 // "Home" gets a house icon instead of initials — it isn't a
                 // real space, just the unfiltered room list. A decoded

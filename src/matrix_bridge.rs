@@ -632,7 +632,7 @@ async fn room_summary(room: &Room) -> RoomSummary {
 
 /// Small thumbnail of a space's avatar, sized for the filter chip row.
 async fn space_avatar(room: &Room) -> Option<Vec<u8>> {
-    let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(64), uint!(64)));
+    let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(96), uint!(96)));
     room.avatar(format).await.ok().flatten()
 }
 
