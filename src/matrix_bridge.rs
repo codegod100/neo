@@ -703,6 +703,7 @@ async fn login_once(
     store_path: &Path,
 ) -> anyhow::Result<(Client, String, String)> {
     std::fs::create_dir_all(store_path).ok();
+    scrub_legacy_to_device_token(store_path);
 
     let client = Client::builder()
         .server_name_or_homeserver_url(homeserver)
@@ -758,6 +759,7 @@ async fn login_sso_once(
     store_path: &Path,
 ) -> anyhow::Result<(Client, String, String)> {
     std::fs::create_dir_all(store_path).ok();
+    scrub_legacy_to_device_token(store_path);
 
     let client = Client::builder()
         .server_name_or_homeserver_url(homeserver)
@@ -809,6 +811,43 @@ fn is_stale_crypto_store(err: &anyhow::Error) -> bool {
 
 fn wipe_store(store_path: &Path) {
     let _ = std::fs::remove_dir_all(store_path);
+}
+
+/// One-time migration for stores that predate the sliding-sync (MSC4186)
+/// switch in c14dd90. Back then neo drove classic `/sync`, and matrix-sdk's
+/// crypto store persisted that response's `next_batch` token (a `/sync`-style
+/// opaque batch id like `s364146337_276461_...`) under the `next_batch_token`
+/// key so a future classic sync could resume from it. `EncryptionSyncService`
+/// (which now drives to-device/e2ee sync) reads that same stored key and
+/// sends it verbatim as the sliding-sync `to_device.since` extension param —
+/// but sliding sync wants a small integer there, not a `/sync` batch token.
+/// The homeserver 400s with `M_INVALID_PARAM`, which kills the whole
+/// `SyncService` (rooms *and* encryption) right after startup.
+///
+/// There's no public matrix-sdk API to clear just that one field, so this
+/// reaches into the crypto store's sqlite file directly and deletes the row
+/// — safe because `next_batch_token` lives in a plain key/value table
+/// (`kv`), untouched by anything else this drops the row from; Olm/Megolm
+/// sessions, device keys, and cross-signing state are unaffected. A marker
+/// file makes this run at most once per store: after the first sliding sync,
+/// `next_batch_token` holds a valid sliding-sync token that must be left
+/// alone.
+fn scrub_legacy_to_device_token(store_path: &Path) {
+    std::fs::create_dir_all(store_path).ok();
+
+    let marker = store_path.join(".to-device-token-migrated");
+    if marker.exists() {
+        return;
+    }
+
+    let db_path = store_path.join("matrix-sdk-crypto.sqlite3");
+    if db_path.exists() {
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            let _ = conn.execute("DELETE FROM kv WHERE key = 'next_batch_token'", []);
+        }
+    }
+
+    let _ = std::fs::write(marker, b"");
 }
 
 /// Sqlite store directory for a given `(homeserver, username)` pair.
@@ -875,6 +914,8 @@ async fn try_restore_session() -> Option<(Client, String, String)> {
         let _ = std::fs::remove_file(&path);
         return None;
     };
+
+    scrub_legacy_to_device_token(&saved.store_path);
 
     let client = Client::builder()
         .server_name_or_homeserver_url(&saved.homeserver)

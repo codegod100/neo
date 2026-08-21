@@ -38,8 +38,12 @@ impl FactoryComponent for SpaceChip {
     view! {
         #[root]
         gtk::Button {
-            add_css_class: "flat",
-            add_css_class: if self.selected { "suggested-action" } else { "" },
+            #[watch]
+            set_css_classes: if self.selected {
+                &["flat", "suggested-action"]
+            } else {
+                &["flat"]
+            },
             set_tooltip_text: Some(&self.label),
             set_halign: gtk::Align::Center,
 

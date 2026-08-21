@@ -2765,6 +2765,7 @@ dependencies = [
  "matrix-sdk-ui",
  "open",
  "relm4",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
