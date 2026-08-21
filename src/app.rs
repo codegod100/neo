@@ -512,13 +512,27 @@ impl SimpleComponent for AppModel {
                                     set_icon_name: "go-previous-symbolic",
                                     connect_clicked => AppMsg::Back,
                                 },
-                                gtk::Label {
-                                    #[watch]
-                                    set_label: &model.active_room_name(),
-                                    add_css_class: "title-3",
+                                gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
                                     set_hexpand: true,
-                                    set_halign: gtk::Align::Start,
-                                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+                                    set_valign: gtk::Align::Center,
+
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: &model.active_room_name(),
+                                        add_css_class: "title-3",
+                                        set_halign: gtk::Align::Start,
+                                        set_ellipsize: gtk::pango::EllipsizeMode::End,
+                                    },
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: &model.active_room_address(),
+                                        add_css_class: "dim-label",
+                                        add_css_class: "caption",
+                                        set_halign: gtk::Align::Start,
+                                        set_ellipsize: gtk::pango::EllipsizeMode::End,
+                                        set_selectable: true,
+                                    },
                                 },
                             },
 
@@ -1059,6 +1073,12 @@ impl AppModel {
 
     fn active_room_name(&self) -> String {
         self.active_room_summary().map(|r| r.name.clone()).unwrap_or_else(|| "Room".to_owned())
+    }
+
+    /// The room's Matrix ID (e.g. `!abc123:example.org`), shown under the
+    /// channel name so users can find/share the room's real address.
+    fn active_room_address(&self) -> String {
+        self.active_room_summary().map(|r| r.id.clone()).unwrap_or_default()
     }
 
     /// Every `MatrixEvent::Timeline` is a full, already-deduplicated snapshot
