@@ -909,14 +909,24 @@ impl AppModel {
                 // A space the user switched into may have been left/removed
                 // server-side by the time this update lands — fall back to
                 // Home instead of showing an empty, unrecoverable list.
+                //
+                // `space_children` omits entries for spaces with zero
+                // children (see `collect_space_children`), so checking its
+                // keys can't distinguish "left/removed" from "still joined,
+                // just empty" — an empty space would fail `contains_key` on
+                // every one of these updates and get silently kicked back
+                // to Home a moment after being selected. Check against the
+                // known room list instead.
                 if let Some(active) = &self.active_space {
-                    if !space_children.contains_key(active) {
+                    let still_joined = self.rooms.iter().any(|r| r.is_space && &r.id == active);
+                    if !still_joined {
                         self.active_space = None;
                     }
                 }
                 self.space_children = space_children;
                 self.loading_rooms = false;
                 self.sync_room_list();
+                self.sync_space_chips();
             }
             MatrixEvent::Timeline { room_id, messages } => {
                 self.apply_timeline(room_id, messages);
@@ -1005,7 +1015,7 @@ impl AppModel {
                 id: id.clone(),
                 label: label.clone(),
                 avatar: avatar.clone(),
-                selected: self.active_space.as_ref() == id.as_ref(),
+                state: (self.active_space.as_ref() == id.as_ref()).into(),
             });
         }
         drop(guard);

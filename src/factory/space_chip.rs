@@ -12,6 +12,37 @@ use gtk::{gdk, glib};
 use relm4::factory::{FactoryComponent, FactorySender};
 use relm4::{adw, gtk};
 
+/// A chip's selection state. Kept as its own enum — rather than a bare
+/// `bool` with the CSS classes worked out inline wherever it's read — so
+/// there's exactly one place (`css_classes`) that decides what a state
+/// looks like. `.flat` zeroes out a button's resting-state background in
+/// Adwaita, and that rule wins over `.suggested-action`'s background when
+/// both classes are present on a button at rest; only the transient
+/// hover/press pseudo-classes paint over `.flat` regardless, so a chip
+/// combining both classes flashed color on click and faded right back.
+/// Routing every transition through here means that combination can only
+/// be reintroduced by editing this one function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChipState {
+    Unselected,
+    Selected,
+}
+
+impl ChipState {
+    fn css_classes(self) -> &'static [&'static str] {
+        match self {
+            ChipState::Unselected => &["flat"],
+            ChipState::Selected => &["suggested-action"],
+        }
+    }
+}
+
+impl From<bool> for ChipState {
+    fn from(selected: bool) -> Self {
+        if selected { ChipState::Selected } else { ChipState::Unselected }
+    }
+}
+
 #[derive(Debug)]
 pub struct SpaceChip {
     pub id: Option<String>,
@@ -19,7 +50,7 @@ pub struct SpaceChip {
     /// Raw avatar thumbnail bytes for the space, if it has one set. `None`
     /// for the "Home" chip and for spaces without an avatar.
     pub avatar: Option<Vec<u8>>,
-    pub selected: bool,
+    pub state: ChipState,
 }
 
 #[derive(Debug)]
@@ -27,7 +58,7 @@ pub enum SpaceChipOutput {
     Select(Option<String>),
 }
 
-/// Toggles which chip is highlighted without touching anything else about
+/// Transitions this chip's `ChipState` without touching anything else about
 /// it. Sent in place of rebuilding the chip list so the GTK button you just
 /// clicked keeps keyboard focus instead of being destroyed and recreated
 /// (see `AppModel::sync_space_chips`).
@@ -48,11 +79,7 @@ impl FactoryComponent for SpaceChip {
         #[root]
         gtk::Button {
             #[watch]
-            set_css_classes: if self.selected {
-                &["flat", "suggested-action"]
-            } else {
-                &["flat"]
-            },
+            set_css_classes: self.state.css_classes(),
             set_tooltip_text: Some(&self.label),
             set_halign: gtk::Align::Center,
 
@@ -79,7 +106,7 @@ impl FactoryComponent for SpaceChip {
 
     fn update(&mut self, msg: Self::Input, _sender: FactorySender<Self>) {
         match msg {
-            SpaceChipInput::SetSelected(selected) => self.selected = selected,
+            SpaceChipInput::SetSelected(selected) => self.state = selected.into(),
         }
     }
 }
