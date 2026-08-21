@@ -35,10 +35,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use eyeball_im::Vector;
 use futures_util::{pin_mut, StreamExt};
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::config::RequestConfig;
 use matrix_sdk::deserialized_responses::SyncOrStrippedState;
 use matrix_sdk::media::{MediaFormat, MediaThumbnailSettings};
 use matrix_sdk::ruma::api::client::space::get_hierarchy;
@@ -558,7 +560,15 @@ async fn fetch_hierarchy(client: &Client, space_id: &str) -> anyhow::Result<Vec<
         let mut request = get_hierarchy::v1::Request::new(root.clone());
         request.from = from.clone();
         request.limit = Some(uint!(50));
-        let response = client.send(request).await?;
+        // `/hierarchy` is comparatively slow (the server may walk/refresh
+        // remote space-child state) and, in the `JoinRoom` flow, gets called
+        // again immediately after the join itself — give it a longer
+        // timeout and its own retry budget so a single transient network
+        // hiccup doesn't surface as a raw, unretried transport error.
+        let response = client
+            .send(request)
+            .with_request_config(RequestConfig::new().retry_limit(3).timeout(Duration::from_secs(60)))
+            .await?;
         for chunk in &response.rooms {
             for raw_child in &chunk.children_state {
                 let child: HierarchySpaceChildEvent = match raw_child.deserialize() {
@@ -722,6 +732,12 @@ async fn login_once(
     let client = Client::builder()
         .server_name_or_homeserver_url(homeserver)
         .sqlite_store(store_path, None)
+        // Without this, matrix-sdk only retries HTTP-level failures
+        // (429/5xx); a transport-level hiccup (DNS, dropped connection, TLS)
+        // fails on the first attempt instead of getting matrix-sdk's
+        // exponential-backoff retry. See the "lobby: error sending request"
+        // bug this fixed.
+        .request_config(RequestConfig::new().retry_limit(3))
         .build()
         .await?;
 
@@ -777,6 +793,12 @@ async fn login_sso_once(
     let client = Client::builder()
         .server_name_or_homeserver_url(homeserver)
         .sqlite_store(store_path, None)
+        // Without this, matrix-sdk only retries HTTP-level failures
+        // (429/5xx); a transport-level hiccup (DNS, dropped connection, TLS)
+        // fails on the first attempt instead of getting matrix-sdk's
+        // exponential-backoff retry. See the "lobby: error sending request"
+        // bug this fixed.
+        .request_config(RequestConfig::new().retry_limit(3))
         .build()
         .await?;
 
@@ -894,6 +916,9 @@ async fn try_restore_session() -> Option<(Client, String, String)> {
     let client = Client::builder()
         .server_name_or_homeserver_url(&saved.homeserver)
         .sqlite_store(&saved.store_path, None)
+        // See the matching comment in `login_once` — without this, a
+        // transient network hiccup fails outright instead of retrying.
+        .request_config(RequestConfig::new().retry_limit(3))
         .build()
         .await
         .ok()?;
