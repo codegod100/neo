@@ -27,10 +27,19 @@ pub enum SpaceChipOutput {
     Select(Option<String>),
 }
 
+/// Toggles which chip is highlighted without touching anything else about
+/// it. Sent in place of rebuilding the chip list so the GTK button you just
+/// clicked keeps keyboard focus instead of being destroyed and recreated
+/// (see `AppModel::sync_space_chips`).
+#[derive(Debug)]
+pub enum SpaceChipInput {
+    SetSelected(bool),
+}
+
 #[relm4::factory(pub)]
 impl FactoryComponent for SpaceChip {
     type Init = SpaceChip;
-    type Input = ();
+    type Input = SpaceChipInput;
     type Output = SpaceChipOutput;
     type CommandOutput = ();
     type ParentWidget = gtk::Box;
@@ -66,6 +75,12 @@ impl FactoryComponent for SpaceChip {
 
     fn init_model(init: Self::Init, _index: &relm4::factory::DynamicIndex, _sender: FactorySender<Self>) -> Self {
         init
+    }
+
+    fn update(&mut self, msg: Self::Input, _sender: FactorySender<Self>) {
+        match msg {
+            SpaceChipInput::SetSelected(selected) => self.selected = selected,
+        }
     }
 }
 

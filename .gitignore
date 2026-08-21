@@ -19,3 +19,9 @@
 # usual convention (see arelm): hermetic `buck2 build` for anyone who
 # clones this repo, no reindeer/cargo/network access needed unless
 # Cargo.toml/Cargo.lock actually changes.
+
+# Machine-local secrets/config: BuildBuddy API key and the buck2 remote
+# cache config that references it. Never committed.
+/.env
+/.envrc
+/.buckconfig.local
