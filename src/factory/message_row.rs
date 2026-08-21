@@ -93,7 +93,8 @@ impl FactoryComponent for MessageRow {
                     set_orientation: gtk::Orientation::Vertical,
 
                     gtk::Label {
-                        set_label: self.body(),
+                        set_label: &self.body_markup(),
+                        set_use_markup: true,
                         set_wrap: true,
                         set_wrap_mode: gtk::pango::WrapMode::WordChar,
                         set_max_width_chars: 42,
@@ -153,6 +154,13 @@ impl MessageRow {
         self.message().map(|m| m.body.as_str()).unwrap_or_default()
     }
 
+    /// The message body as Pango markup, with any `http(s)://` URLs turned
+    /// into clickable links. GTK's label widget opens `<a href>` links
+    /// itself, so no click handling is needed beyond `set_use_markup`.
+    fn body_markup(&self) -> String {
+        linkify(self.body())
+    }
+
     /// The sender's room display name, falling back to their raw MXID when
     /// the member event hasn't been seen yet.
     fn display_name(&self) -> &str {
@@ -171,6 +179,52 @@ impl MessageRow {
     fn timestamp_label(&self) -> String {
         self.message().map(|m| format_timestamp(m.ts_millis)).unwrap_or_default()
     }
+}
+
+/// Escapes `text` as Pango markup, wrapping any `http://` or `https://` URL
+/// in an `<a href>` tag so GTK renders it as a clickable link. URLs are
+/// detected by scanning for the scheme and extending to the next
+/// whitespace, then trimming trailing punctuation (e.g. a sentence-ending
+/// period or a closing paren with no matching open paren) that's unlikely
+/// to be part of the URL itself.
+fn linkify(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+
+    loop {
+        let start = ["http://", "https://"]
+            .iter()
+            .filter_map(|scheme| rest.find(scheme))
+            .min();
+
+        let Some(idx) = start else {
+            out.push_str(&glib::markup_escape_text(rest));
+            break;
+        };
+
+        out.push_str(&glib::markup_escape_text(&rest[..idx]));
+
+        let candidate = &rest[idx..];
+        let end = candidate.find(char::is_whitespace).unwrap_or(candidate.len());
+        let mut url = &candidate[..end];
+        while let Some(last) = url.chars().last() {
+            let trim = match last {
+                '.' | ',' | '!' | '?' | ':' | ';' | '\'' | '"' => true,
+                ')' => url.matches('(').count() <= url.matches(')').count() - 1,
+                _ => false,
+            };
+            if !trim {
+                break;
+            }
+            url = &url[..url.len() - last.len_utf8()];
+        }
+
+        let escaped = glib::markup_escape_text(url);
+        out.push_str(&format!(r#"<a href="{escaped}">{escaped}</a>"#));
+        rest = &candidate[url.len()..];
+    }
+
+    out
 }
 
 /// Render a `origin_server_ts` (millis since the Unix epoch) as a short
