@@ -355,7 +355,7 @@ impl SimpleComponent for AppModel {
                                 // narrow avatar column. Hidden here; the
                                 // rail still scrolls fine with wheel/trackpad.
                                 set_vscrollbar_policy: gtk::PolicyType::Never,
-                                set_width_request: 64,
+                                set_width_request: 72,
 
                                 #[local_ref]
                                 space_chip_box -> gtk::Box {
