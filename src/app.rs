@@ -821,7 +821,13 @@ impl SimpleComponent for AppModel {
             AppMsg::LobbyOpenRoom(id) => self.open_room(id),
             AppMsg::LobbyJoinRoom(id) => {
                 if let Some(space_id) = self.lobby_space.clone() {
-                    let _ = self.cmd_tx.send(MatrixCmd::JoinRoom { room_id: id, space_id });
+                    let via = self
+                        .lobby_rooms
+                        .iter()
+                        .find(|r| r.id == id)
+                        .map(|r| r.via.clone())
+                        .unwrap_or_default();
+                    let _ = self.cmd_tx.send(MatrixCmd::JoinRoom { room_id: id, space_id, via });
                 }
             }
 

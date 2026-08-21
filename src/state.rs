@@ -70,6 +70,11 @@ pub struct LobbyRoom {
     pub id: String,
     pub name: String,
     pub joined: bool,
+    /// Servers the space's `m.space.child` event for this room named as
+    /// likely to know it (`content.via`), used as the join request's
+    /// `via`/`server_name` hint so the homeserver has somewhere to route the
+    /// join to. May be empty if the space didn't advertise any.
+    pub via: Vec<String>,
 }
 
 /// One rendered chat line.

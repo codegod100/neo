@@ -46,9 +46,9 @@ use matrix_sdk::ruma::api::client::sync::sync_events::v5::request::ListFilters;
 use matrix_sdk::ruma::directory::RoomTypeFilter;
 use matrix_sdk::ruma::events::room::message::{MessageType, RoomMessageEventContent};
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
+use matrix_sdk::ruma::events::space::child::{HierarchySpaceChildEvent, SpaceChildEventContent};
 use matrix_sdk::ruma::events::{StateEventType, SyncStateEvent};
-use matrix_sdk::ruma::{uint, MxcUri, OwnedMxcUri, RoomId};
+use matrix_sdk::ruma::{uint, MxcUri, OwnedMxcUri, OwnedRoomId, RoomId, RoomOrAliasId, ServerName};
 use matrix_sdk::sliding_sync::{SlidingSyncList, SlidingSyncMode, Version};
 use matrix_sdk::{Client, Room, RoomState};
 use matrix_sdk_ui::sync_service::SyncService;
@@ -81,8 +81,12 @@ pub enum MatrixCmd {
     /// server's `/hierarchy` endpoint, for that space's "Lobby" screen.
     OpenLobby(String),
     /// Join a room surfaced in a space's Lobby directory, then re-fetch that
-    /// space's hierarchy so the row flips to "joined".
-    JoinRoom { room_id: String, space_id: String },
+    /// space's hierarchy so the row flips to "joined". `via` is the list of
+    /// servers (from that room's `LobbyRoom::via`, ultimately the space's
+    /// `m.space.child` event) to hint to the homeserver — without it, a join
+    /// by room ID for a room the server doesn't already know fails with
+    /// `M_UNKNOWN: No known servers`.
+    JoinRoom { room_id: String, space_id: String, via: Vec<String> },
     /// Drop the session.
     Logout,
 }
@@ -351,12 +355,25 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                         }
                     }
 
-                    MatrixCmd::JoinRoom { room_id, space_id } => {
+                    MatrixCmd::JoinRoom { room_id, space_id, via } => {
                         if let Some(c) = client.clone() {
                             let evt_tx = evt_tx.clone();
                             tokio::spawn(async move {
                                 let Ok(rid) = RoomId::parse(&room_id) else { return };
-                                if let Err(err) = c.join_room_by_id(&rid).await {
+                                let mut server_names: Vec<_> =
+                                    via.iter().filter_map(|s| ServerName::parse(s).ok()).collect();
+                                if server_names.is_empty() {
+                                    // Nothing advertised by the space — fall back to the
+                                    // room ID's own domain, the same heuristic other
+                                    // clients use, so the join at least has one server
+                                    // to try instead of hard-failing with "No known
+                                    // servers".
+                                    if let Some(own) = rid.server_name() {
+                                        server_names.push(own.to_owned());
+                                    }
+                                }
+                                let alias: &RoomOrAliasId = (&*rid).into();
+                                if let Err(err) = c.join_room_by_id_or_alias(alias, &server_names).await {
                                     let _ = evt_tx.send(MatrixEvent::Error(format!("join room: {err}")));
                                     return;
                                 }
@@ -547,22 +564,43 @@ async fn collect_space_children(client: &Client) -> HashMap<String, Vec<String>>
 async fn fetch_hierarchy(client: &Client, space_id: &str) -> anyhow::Result<Vec<LobbyRoom>> {
     let root = RoomId::parse(space_id)?;
     let mut rooms = Vec::new();
+    // Every chunk in the response (not just the root's) can carry
+    // `children_state` — the stripped `m.space.child` events for *its*
+    // children — and that's the only place the server tells us which
+    // servers ("via") are likely to know a given child room. Collect them
+    // all up front, keyed by child room ID, so nested/grandchild rooms get
+    // via hints too, not just the space's direct children.
+    let mut via_by_room: HashMap<OwnedRoomId, Vec<String>> = HashMap::new();
     let mut from = None;
     for _ in 0..20 {
         let mut request = get_hierarchy::v1::Request::new(root.clone());
         request.from = from.clone();
         request.limit = Some(uint!(50));
         let response = client.send(request).await?;
+        for chunk in &response.rooms {
+            for raw_child in &chunk.children_state {
+                let child: HierarchySpaceChildEvent = match raw_child.deserialize() {
+                    Ok(child) => child,
+                    Err(_) => continue,
+                };
+                let via: Vec<String> = child.content.via.iter().map(|s| s.to_string()).collect();
+                if !via.is_empty() {
+                    via_by_room.insert(child.state_key, via);
+                }
+            }
+        }
         for chunk in response.rooms {
             if chunk.room_id == root {
                 continue; // the space's own row — not a channel to list
             }
             let joined =
                 client.get_room(&chunk.room_id).is_some_and(|r| r.state() == RoomState::Joined);
+            let via = via_by_room.get(&chunk.room_id).cloned().unwrap_or_default();
             rooms.push(LobbyRoom {
                 id: chunk.room_id.to_string(),
                 name: chunk.name.unwrap_or_else(|| chunk.room_id.to_string()),
                 joined,
+                via,
             });
         }
         from = response.next_batch;
@@ -1020,6 +1058,19 @@ mod tests {
         })
     }
 
+    /// A stripped `m.space.child` state event, as it appears in a hierarchy
+    /// chunk's `children_state` — the only place the server tells us which
+    /// servers ("via") are likely to know a given child room.
+    fn child_state_event(room_id: &str, via: &[&str]) -> serde_json::Value {
+        json!({
+            "content": { "via": via },
+            "origin_server_ts": 0,
+            "sender": "@alice:example.org",
+            "state_key": room_id,
+            "type": "m.space.child",
+        })
+    }
+
     /// Mounts a single-page `/hierarchy` response containing the space's own
     /// row (which `fetch_hierarchy` must filter out) plus the given children.
     async fn mock_hierarchy(server: &MockServer, space_id: &str, children: &[(&str, &str)]) {
@@ -1099,5 +1150,33 @@ mod tests {
 
         let after = fetch_hierarchy(&client, space_id).await.unwrap();
         assert!(after[0].joined, "fetch_hierarchy should see the local join immediately");
+    }
+
+    /// Regression test for the "join room: ... No known servers" bug: the
+    /// server only advertises a child room's `via` hints in the *parent's*
+    /// hierarchy chunk (`children_state`), not the child's own chunk, so
+    /// `fetch_hierarchy` must read them from there and attach them to the
+    /// `LobbyRoom` — otherwise nothing is left to pass into the join request.
+    #[tokio::test]
+    async fn fetch_hierarchy_surfaces_via_from_the_parent_chunk() {
+        let (client, server) = logged_in_client_with_server().await;
+        let space_id = "!space:example.org";
+        let child_id = "!a:example.org";
+
+        let mut root = room_chunk(space_id, "The Space Itself");
+        root["children_state"] =
+            json!([child_state_event(child_id, &["example.org", "backup.example.org"])]);
+        let rooms = vec![root, room_chunk(child_id, "Anteaters")];
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"rooms/[^/]+/hierarchy$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "rooms": rooms })))
+            .mount(&server)
+            .await;
+
+        let rooms = fetch_hierarchy(&client, space_id).await.unwrap();
+
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].via, vec!["example.org", "backup.example.org"]);
     }
 }
