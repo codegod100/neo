@@ -14,7 +14,7 @@ use relm4::factory::FactoryVecDeque;
 use relm4::prelude::*;
 
 use crate::factory::lobby_row::{LobbyRoomRow, LobbyRoomRowOutput};
-use crate::factory::message_row::MessageRow;
+use crate::factory::message_row::{format_day_label, local_day, MessageRow, TimelineRow};
 use crate::factory::room_row::{RoomRow, RoomRowOutput};
 use crate::factory::space_chip::{SpaceChip, SpaceChipInput, SpaceChipOutput};
 use crate::matrix_bridge::{self, MatrixCmd, MatrixEvent};
@@ -1084,8 +1084,14 @@ impl AppModel {
         let mut guard = self.message_factory.guard();
         guard.clear();
         let Some(room_id) = self.active_room.clone() else { return };
+        let mut last_day = None;
         for msg in self.messages.get(&room_id).cloned().unwrap_or_default() {
-            guard.push_back(msg);
+            let day = local_day(msg.ts_millis);
+            if day.is_some() && day != last_day {
+                last_day = day;
+                guard.push_back(TimelineRow::DaySeparator(format_day_label(day.unwrap())));
+            }
+            guard.push_back(TimelineRow::Message(msg));
         }
     }
 
