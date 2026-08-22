@@ -534,6 +534,11 @@ async fn build_space_sliding_sync(client: &Client) -> anyhow::Result<matrix_sdk:
         .sync_mode(SlidingSyncMode::new_growing(50))
         .timeline_limit(0u32)
         .required_state(vec![
+            // `Room::is_space()` classifies a room from the `type` field on
+            // its `m.room.create` event. Without requesting that state, spaces
+            // absent from the existing local cache are mistaken for ordinary
+            // rooms and never reach the space rail.
+            (StateEventType::RoomCreate, "".to_owned()),
             (StateEventType::RoomName, "".to_owned()),
             (StateEventType::SpaceChild, "*".to_owned()),
         ])
