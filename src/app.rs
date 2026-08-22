@@ -206,7 +206,7 @@ impl SimpleComponent for AppModel {
             lobby_factory.widget(),
             message_factory.widget(),
         );
-        let toast_overlay = toaster.overlay_widget();
+        let toast_overlay = toaster.overlay_widget().clone();
         toast_overlay.set_child(Some(&ui.root));
 
         let mut model = AppModel {

@@ -18,20 +18,11 @@
 # requirements in the rlib's metadata, so they propagate automatically to
 # whatever finally links against it (no `-l` flags needed here). But
 # system-deps' build.rs never emits `cargo:rustc-link-search` pointing
-# anywhere useful on this machine (GTK4/libadwaita only exist under
-# Homebrew's non-standard Cellar paths, not a linker default dir) - `-l`
+# anywhere useful on this machine - `-l`
 # embedding doesn't carry `-L` along with it, so the actual link step below
-# needs those search paths passed explicitly (pkg-config itself doesn't need
-# this on this machine - see README.md's "Building" section on why).
+# needs the Nix environment's unified library path passed explicitly.
 GTK4_LIB_DIRS = [
-    "-L/home/linuxbrew/.linuxbrew/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/libadwaita/1.9.3/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/gtk4/4.22.4/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/pango/1.58.2/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/harfbuzz/14.3.1/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/cairo/1.18.4/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/graphene/1.10.8/lib",
-    "-L/home/linuxbrew/.linuxbrew/Cellar/glib/2.88.3/lib",
+    "-L/opt/neo-nix/lib",
 ]
 
 # buck2 has no built-in cargo-style dev/release profile concept - `buck2

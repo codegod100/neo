@@ -39,10 +39,10 @@ load("@prelude//toolchains:kotlin.bzl", "kotlincd_toolchain", "system_kotlin_boo
 load("@prelude//toolchains:ocaml.bzl", "system_ocaml_toolchain")
 load("@prelude//toolchains:python.bzl", "remote_python_toolchain", "system_python_wheel_toolchain")
 load("@prelude//toolchains:remote_test_execution.bzl", "remote_test_execution_toolchain")
-load("@prelude//toolchains:rust.bzl", "system_rust_toolchain")
 load("@prelude//toolchains:zip_file.bzl", "zip_file_toolchain")
 load("@prelude//toolchains/go:system_go_bootstrap_toolchain.bzl", "system_go_bootstrap_toolchain")
 load("@prelude//toolchains/go:system_go_toolchain.bzl", "system_go_toolchain")
+load("@root//snowydeer:nix_rust_toolchain.bzl", "nix_rust_toolchain")
 load(":defs.bzl", "android_hack_alias")
 
 android_sdk_tools(
@@ -70,9 +70,9 @@ android_hack_alias(
 
 system_cxx_toolchain(
     name = "cxx",
-    archiver = "/usr/bin/ar",
-    compiler = "/var/home/nandi/.local/bin/clang",
-    cxx_compiler = "/var/home/nandi/.local/bin/clang++",
+    archiver = "/opt/neo-nix/bin/ar",
+    compiler = "/opt/neo-nix/bin/clang",
+    cxx_compiler = "/opt/neo-nix/bin/clang++",
     visibility = ["PUBLIC"],
 )
 
@@ -243,9 +243,10 @@ system_python_wheel_toolchain(
     visibility = ["PUBLIC"],
 )
 
-system_rust_toolchain(
+nix_rust_toolchain(
     name = "rust",
     default_edition = "2021",
+    nix_rust = "root//nix:environment",
     visibility = ["PUBLIC"],
 )
 

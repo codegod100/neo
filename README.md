@@ -14,11 +14,8 @@ A [matrix.org](https://matrix.org) chat client built with
   (sqlite store, rustls, e2e-encryption + automatic room-key forwarding)
 - `tokio` — background runtime for the network bridge
 
-Building requires GTK4 and libadwaita development files (`.pc` files discoverable by
-`pkg-config`) — on distros without a system package for these,
-[Homebrew](https://brew.sh) (`brew install gtk4 libadwaita`) works too; point
-`PKG_CONFIG_PATH` at its `lib/pkgconfig` if your `pkg-config` doesn't already
-know that prefix (Homebrew's own `pkg-config` build does).
+The Buck build uses the pinned Nix environment in `nix/flake.nix` for Rust,
+Clang, GTK4, libadwaita, SQLite, Blueprint, and their native dependencies.
 
 ## Architecture
 
@@ -115,6 +112,22 @@ project builds — there's no `cargo build` fallback:
 buck2 build //:neo   # or: buck2 run //:neo
 ```
 
+The remote execution platform uses a persistent, bare BuildBuddy worker rather
+than an OCI image. A Snowydeer-derived `nix_build` rule realizes the pinned
+environment on that worker and exposes Buck-managed Rust tool launchers; native
+tools found by Cargo build scripts use the same closure through
+`/opt/neo-nix`. To update the worker after changing `nix/flake.nix` or
+`nix/flake.lock`:
+
+```sh
+bash nix/deploy-rbe.sh
+```
+
+Override `RBE_HOST`, `RBE_FLAKE_DIR`, or `RBE_NIX_PROFILE` when deploying a
+different executor. The checked-in `nix/buildbuddy-executor.service` is the
+corresponding systemd unit; its credential file must define
+`BUILDBUDDY_EXECUTOR_API_KEY` with mode `0600`.
+
 `Cargo.toml`/`Cargo.lock` are never built from directly — they exist purely
 as [reindeer](https://github.com/facebookincubator/reindeer)'s
 dependency-resolution input, which reads them and generates real buck2
@@ -144,12 +157,12 @@ worth knowing if buckify/build starts failing after a dependency bump:
   `Cargo.toml` when a proc-macro like ruma's reads it at compile time via
   `proc_macro_crate::crate_name`) — reindeer's default srcs walk misses
   these, so they need an explicit `extra_srcs` glob.
-- **Toolchain tool paths must be absolute.** `toolchains/BUCK` inlines
-  `system_demo_toolchains()` with the `cxx` toolchain's `compiler`/
-  `cxx_compiler`/`archiver` set to absolute paths, because build scripts that
-  shell out to a C compiler (ring, libsqlite3-sys, blake3) run through a
-  wrapper that resolves `$CC`/`$CXX`/`$AR` via `os.execl`, which — unlike
-  buck2's own native compile/link actions — does not search `$PATH`.
+- **Toolchain tool paths must be absolute.** `toolchains/BUCK` points the C/C++
+  compiler and archiver at `/opt/neo-nix`, because build scripts that shell out
+  to a C compiler (ring, libsqlite3-sys, blake3) run through a wrapper that
+  resolves `$CC`/`$CXX`/`$AR` via `os.execl`, which — unlike buck2's own native
+  compile/link actions — does not search `$PATH`. Rust is supplied as an
+  artifact-backed Snowydeer toolchain instead.
 
 ## Testing
 

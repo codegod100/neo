@@ -1,0 +1,18 @@
+[Unit]
+Description=BuildBuddy RBE Executor (bare Nix worker)
+Documentation=https://www.buildbuddy.io/docs/rbe-platforms/
+After=network-online.target nix-daemon.service
+Wants=network-online.target
+ConditionPathExists=/etc/buildbuddy-executor/credential.env
+ConditionPathExists=/opt/neo-nix/bin/rustc
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/buildbuddy-executor/credential.env
+ExecStart=/usr/local/bin/buildbuddy-executor --executor.api_key=${BUILDBUDDY_EXECUTOR_API_KEY} --executor.app_target=grpcs://remote.buildbuddy.io --executor.pool=neo-rbe --executor.region=hetzner-nbg1 --executor.enable_bare_runner --executor.default_isolation_type=none --executor.root_directory=/var/lib/buildbuddy-executor/remotebuilds --executor.local_cache_directory=/var/lib/buildbuddy-executor/filecache --executor.local_cache_size_bytes=20000000000 --executor.memory_bytes=13000000000 --executor.millicpu=7500 --executor.extra_env_vars=PATH=/opt/neo-nix/bin:/root/.nix-profile/bin:/usr/bin:/bin --executor.extra_env_vars=PKG_CONFIG_PATH=/opt/neo-nix/lib/pkgconfig:/opt/neo-nix/share/pkgconfig --executor.extra_env_vars=LIBRARY_PATH=/opt/neo-nix/lib --executor.extra_env_vars=CPATH=/opt/neo-nix/include
+Restart=always
+RestartSec=5s
+TimeoutStopSec=45s
+
+[Install]
+WantedBy=multi-user.target

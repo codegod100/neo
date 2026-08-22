@@ -1,0 +1,25 @@
+load("//snowydeer:nix_build.bzl", "nix_build")
+
+filegroup(
+    name = "flake",
+    srcs = glob([
+        "flake.nix",
+        "flake.lock",
+    ]),
+)
+
+# Snowydeer normally realizes this locally because its absolute /nix/store
+# output must exist where consuming actions execute. Neo intentionally realizes
+# it remotely: all consumers are forced onto the single persistent neo-rbe pool,
+# whose bare runner and Nix store are shared.
+nix_build(
+    name = "environment",
+    attr = "neo-rbe-env",
+    binaries = [
+        "clippy-driver",
+        "rustc",
+        "rustdoc",
+    ],
+    flake = ":flake",
+    visibility = ["PUBLIC"],
+)
