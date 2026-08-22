@@ -490,6 +490,8 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                             <property name="name">messages</property>
                             <property name="child">
                               <object class="GtkScrolledWindow" id="message_scroller">
+                                <property name="hscrollbar-policy">2</property>
+                                <property name="vscrollbar-policy">1</property>
                                 <property name="child">
                                   <object class="GtkBox" id="message_mount">
                                     <property name="orientation">1</property>

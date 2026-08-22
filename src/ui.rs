@@ -95,6 +95,7 @@ impl AppUi {
         lobby_widget.add_css_class("boxed-list");
         lobby_widget.set_selection_mode(gtk::SelectionMode::None);
         lobby_widget.set_valign(gtk::Align::Start);
+        message_widget.set_orientation(gtk::Orientation::Vertical);
         message_widget.set_spacing(6);
         message_widget.set_valign(gtk::Align::End);
         message_widget.set_margin_top(8);
