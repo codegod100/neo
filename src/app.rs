@@ -74,6 +74,7 @@ pub struct AppModel {
     restore_scroll_anchor: Rc<Cell<Option<(f64, f64)>>>,
 
     // --- Spaces ---
+    spaces: Vec<RoomSummary>,
     space_children: HashMap<String, Vec<String>>,
     active_space: Option<String>,
     has_spaces: bool,
@@ -233,6 +234,7 @@ impl SimpleComponent for AppModel {
             loading_messages: false,
             message_vadj: None,
             restore_scroll_anchor: Rc::new(Cell::new(None)),
+            spaces: Vec::new(),
             space_children: HashMap::new(),
             active_space: None,
             has_spaces: false,
@@ -549,25 +551,26 @@ impl AppModel {
                 self.sync_room_list();
                 self.sync_space_chips();
             }
-            MatrixEvent::SpaceChildren(space_children) => {
+            MatrixEvent::Spaces { spaces, children } => {
                 // A space the user switched into may have been left/removed
                 // server-side by the time this update lands — fall back to
                 // Home instead of showing an empty, unrecoverable list.
                 //
-                // `space_children` omits entries for spaces with zero
-                // children (see `collect_space_children`), so checking its
+                // `children` omits entries for spaces with zero children, so
+                // checking its
                 // keys can't distinguish "left/removed" from "still joined,
                 // just empty" — an empty space would fail `contains_key` on
                 // every one of these updates and get silently kicked back
                 // to Home a moment after being selected. Check against the
-                // known room list instead.
+                // joined Space summaries instead.
                 if let Some(active) = &self.active_space {
-                    let still_joined = self.rooms.iter().any(|r| r.is_space && &r.id == active);
+                    let still_joined = spaces.iter().any(|space| &space.id == active);
                     if !still_joined {
                         self.active_space = None;
                     }
                 }
-                self.space_children = space_children;
+                self.spaces = spaces;
+                self.space_children = children;
                 self.loading_rooms = false;
                 self.sync_room_list();
                 self.sync_space_chips();
@@ -630,13 +633,12 @@ impl AppModel {
     }
 
     fn sync_space_chips(&mut self) {
-        let spaces: Vec<&RoomSummary> = self.rooms.iter().filter(|r| r.is_space).collect();
-        self.has_spaces = !spaces.is_empty();
+        self.has_spaces = !self.spaces.is_empty();
 
         let mut shape: Vec<(Option<String>, String, Option<Vec<u8>>)> =
-            Vec::with_capacity(spaces.len() + 1);
+            Vec::with_capacity(self.spaces.len() + 1);
         shape.push((None, "Home".to_owned(), None));
-        for space in &spaces {
+        for space in &self.spaces {
             shape.push((Some(space.id.clone()), space.name.clone(), space.avatar.clone()));
         }
 
@@ -749,6 +751,7 @@ impl AppModel {
         self.active_room = None;
         self.messages.clear();
         self.loading_messages = false;
+        self.spaces.clear();
         self.space_children.clear();
         self.active_space = None;
         self.lobby_space = None;

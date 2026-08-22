@@ -247,6 +247,16 @@ nix_rust_toolchain(
     name = "rust",
     default_edition = "2021",
     nix_rust = "root//nix:environment",
+    rustc_binary_flags = [
+        "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",
+        "-Clink-arg=-Wl,-rpath,/home/linuxbrew/.linuxbrew/lib",
+    ],
+    rustc_test_flags = [
+        "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",
+        "-Clink-arg=-Wl,-rpath,/home/linuxbrew/.linuxbrew/lib",
+    ],
     visibility = ["PUBLIC"],
 )
 

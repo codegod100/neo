@@ -102,14 +102,16 @@ pub enum MatrixEvent {
     SsoUrl(String),
     LoggedIn { user_id: String, homeserver: String },
     LoginFailed(String),
-    /// The full joined-room list, re-flattened from the room-list service's
-    /// live `Vector<Room>` every time it changes.
+    /// The joined non-space room list, re-flattened from the room-list
+    /// service's live `Vector<Room>` every time it changes.
     Rooms(Vec<RoomSummary>),
-    /// Which room IDs each joined space claims as children (via
-    /// `m.space.child` state, one level deep — nested subspaces aren't
-    /// flattened). Keyed by space room ID. Updated independently of
-    /// [`MatrixEvent::Rooms`] by the hand-rolled spaces sync.
-    SpaceChildren(HashMap<String, Vec<String>>),
+    /// Joined Space summaries plus the room IDs each Space claims as children
+    /// via `m.space.child` state. Updated independently of
+    /// [`MatrixEvent::Rooms`] because `RoomListService` excludes Spaces.
+    Spaces {
+        spaces: Vec<RoomSummary>,
+        children: HashMap<String, Vec<String>>,
+    },
     /// A full snapshot of the currently-open room's timeline, oldest first.
     Timeline { room_id: String, messages: Vec<ChatMessage> },
     SendFailed { room_id: String, error: String },
@@ -517,8 +519,8 @@ fn spawn_space_sync(client: Client, evt_tx: mpsc::UnboundedSender<MatrixEvent>) 
                 let _ = evt_tx.send(MatrixEvent::Error(format!("space sync: {err}")));
                 continue;
             }
-            let space_children = collect_space_children(&client).await;
-            let _ = evt_tx.send(MatrixEvent::SpaceChildren(space_children));
+            let (spaces, children) = collect_spaces(&client).await;
+            let _ = evt_tx.send(MatrixEvent::Spaces { spaces, children });
         }
     })
 }
@@ -542,18 +544,21 @@ async fn build_space_sliding_sync(client: &Client) -> anyhow::Result<matrix_sdk:
     Ok(sliding_sync)
 }
 
-async fn collect_space_children(client: &Client) -> HashMap<String, Vec<String>> {
-    let mut space_children: HashMap<String, Vec<String>> = HashMap::new();
+async fn collect_spaces(client: &Client) -> (Vec<RoomSummary>, HashMap<String, Vec<String>>) {
+    let mut spaces = Vec::new();
+    let mut children_by_space = HashMap::new();
     for room in client.rooms() {
         if !room.is_space() {
             continue;
         }
         let children = space_child_room_ids(&room).await;
         if !children.is_empty() {
-            space_children.insert(room.room_id().to_string(), children);
+            children_by_space.insert(room.room_id().to_string(), children);
         }
+        spaces.push(room_summary(&room).await);
     }
-    space_children
+    spaces.sort_by_key(|space| space.name.to_lowercase());
+    (spaces, children_by_space)
 }
 
 /// Every room a space advertises via the server's `/hierarchy` endpoint —
