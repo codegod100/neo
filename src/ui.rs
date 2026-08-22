@@ -81,6 +81,9 @@ impl AppUi {
         let room_mount: gtk::Box = object(&builder, "room_mount");
         let lobby_mount: gtk::Box = object(&builder, "lobby_mount");
         let message_mount: gtk::Box = object(&builder, "message_mount");
+        space_widget.set_orientation(gtk::Orientation::Vertical);
+        space_widget.set_spacing(6);
+        space_widget.set_valign(gtk::Align::Start);
         space_mount.append(space_widget);
         room_mount.append(room_widget);
         lobby_mount.append(lobby_widget);
