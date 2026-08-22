@@ -222,12 +222,27 @@ impl ActiveSync {
         // response and can leave a newly-opened room permanently blank.
         self.service.room_list_service().subscribe_to_rooms(&[&rid]).await;
 
+        let timeline_for_initial_backfill = self.active_timeline.clone().expect("timeline was just installed");
         self.timeline_task = Some(tokio::spawn(async move {
             let mut items = initial;
+            let initial_messages = flatten_chat_messages(&items, &client_for_avatars).await;
+            let initial_is_empty = initial_messages.is_empty();
             let _ = evt_tx.send(MatrixEvent::Timeline {
                 room_id: room_id.clone(),
-                messages: flatten_chat_messages(&items, &client_for_avatars).await,
+                messages: initial_messages,
             });
+
+            // Sliding sync initially gives an opened room a small live window.
+            // Busy public rooms can fill that entire window with membership,
+            // reaction, and redaction events, all of which this chat view
+            // intentionally filters out. Follow the event-cache gap once in
+            // that case so the first visible messages are fetched rather than
+            // leaving a joined room looking permanently empty.
+            if initial_is_empty {
+                if let Err(err) = timeline_for_initial_backfill.paginate_backwards(40).await {
+                    let _ = evt_tx.send(MatrixEvent::Error(format!("initial timeline history: {err}")));
+                }
+            }
 
             pin_mut!(diff_stream);
             while let Some(diffs) = diff_stream.next().await {
