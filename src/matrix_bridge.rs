@@ -157,12 +157,16 @@ struct ActiveSync {
     space_sync_task: JoinHandle<()>,
     active_room: Option<String>,
     timeline_task: Option<JoinHandle<()>>,
+    member_profile_task: Option<JoinHandle<()>>,
     active_timeline: Option<Arc<Timeline>>,
 }
 
 impl ActiveSync {
     async fn stop(self) {
         if let Some(task) = self.timeline_task {
+            task.abort();
+        }
+        if let Some(task) = self.member_profile_task {
             task.abort();
         }
         self.room_list_task.abort();
@@ -199,6 +203,9 @@ impl ActiveSync {
         if let Some(task) = self.timeline_task.take() {
             task.abort();
         }
+        if let Some(task) = self.member_profile_task.take() {
+            task.abort();
+        }
         self.active_timeline = None;
         self.active_room = Some(room_id.clone());
 
@@ -221,6 +228,16 @@ impl ActiveSync {
         // sync responses; doing this in the opposite order races a fast sync
         // response and can leave a newly-opened room permanently blank.
         self.service.room_list_service().subscribe_to_rooms(&[&rid]).await;
+
+        // Lazy-loaded member state only covers senders in the small live-sync
+        // window. Back-paginated messages can therefore lack both room display
+        // names and avatars. Let the Timeline fetch the room's member state in
+        // parallel; it updates existing items through `diff_stream` as each
+        // sender profile becomes available.
+        let timeline_for_profiles = self.active_timeline.clone().expect("timeline was just installed");
+        self.member_profile_task = Some(tokio::spawn(async move {
+            timeline_for_profiles.fetch_members().await;
+        }));
 
         let timeline_for_initial_backfill = self.active_timeline.clone().expect("timeline was just installed");
         self.timeline_task = Some(tokio::spawn(async move {
@@ -478,6 +495,7 @@ async fn start_sync(client: Client, evt_tx: mpsc::UnboundedSender<MatrixEvent>) 
         space_sync_task,
         active_room: None,
         timeline_task: None,
+        member_profile_task: None,
         active_timeline: None,
     })
 }
