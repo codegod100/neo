@@ -779,12 +779,14 @@ async fn to_chat_message(
         Some(url) => sender_avatar(client, url, avatar_cache).await,
         None => None,
     };
+    let media_preview = message_media_preview(client, msg.msgtype()).await;
 
     Some(ChatMessage {
         event_id: event.event_id().map(|id| id.to_string()),
         sender: event.sender().to_string(),
         display_name,
         avatar,
+        media_preview,
         body: message_body_text(msg.msgtype(), event.sender().localpart()),
         ts_millis: event.timestamp().0.into(),
         own: event.is_own(),
@@ -810,6 +812,35 @@ async fn sender_avatar(
     let bytes = client.media().get_media_content(&request, true).await.ok();
     avatar_cache.insert(avatar_url.to_owned(), bytes.clone());
     bytes
+}
+
+/// A bounded inline preview for native Matrix media messages. Prefer an
+/// event-provided thumbnail (especially important for videos); otherwise ask
+/// the homeserver for a resized image. Encrypted originals cannot be resized
+/// server-side, so the SDK downloads/decrypts the file and GTK scales it.
+async fn message_media_preview(client: &Client, msgtype: &MessageType) -> Option<Vec<u8>> {
+    let (source, format) = match msgtype {
+        MessageType::Image(image) => {
+            if let Some(thumbnail) = image.info.as_ref().and_then(|info| info.thumbnail_source.clone()) {
+                (thumbnail, MediaFormat::File)
+            } else {
+                let format = if matches!(image.source, MediaSource::Encrypted(_)) {
+                    MediaFormat::File
+                } else {
+                    MediaFormat::Thumbnail(MediaThumbnailSettings::new(uint!(640), uint!(480)))
+                };
+                (image.source.clone(), format)
+            }
+        }
+        MessageType::Video(video) => {
+            let thumbnail = video.info.as_ref()?.thumbnail_source.clone()?;
+            (thumbnail, MediaFormat::File)
+        }
+        _ => return None,
+    };
+
+    let request = MediaRequestParameters { source, format };
+    client.media().get_media_content(&request, true).await.ok()
 }
 
 fn message_body_text(msgtype: &MessageType, sender_localpart: &str) -> String {

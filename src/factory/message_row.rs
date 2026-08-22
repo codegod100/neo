@@ -92,6 +92,16 @@ impl FactoryComponent for MessageRow {
                     add_css_class: if self.own() { "neo-bubble-own" } else { "neo-bubble-other" },
                     set_orientation: gtk::Orientation::Vertical,
 
+                    gtk::Picture {
+                        set_visible: self.media_preview().is_some(),
+                        set_paintable: self.media_texture().as_ref(),
+                        set_content_fit: gtk::ContentFit::Contain,
+                        set_can_shrink: true,
+                        set_width_request: 320,
+                        set_height_request: 240,
+                        set_alternative_text: Some(self.body()),
+                    },
+
                     gtk::Label {
                         set_label: &self.body_markup(),
                         set_use_markup: true,
@@ -173,6 +183,15 @@ impl MessageRow {
     /// fetched for this message.
     fn texture(&self) -> Option<gdk::Texture> {
         let bytes = self.message()?.avatar.as_ref()?;
+        gdk::Texture::from_bytes(&glib::Bytes::from(bytes)).ok()
+    }
+
+    fn media_preview(&self) -> Option<&[u8]> {
+        self.message()?.media_preview.as_deref()
+    }
+
+    fn media_texture(&self) -> Option<gdk::Texture> {
+        let bytes = self.media_preview()?;
         gdk::Texture::from_bytes(&glib::Bytes::from(bytes)).ok()
     }
 

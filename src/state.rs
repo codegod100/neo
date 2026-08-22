@@ -92,6 +92,10 @@ pub struct ChatMessage {
     /// Raw bytes of the sender's avatar thumbnail, if they have one set and
     /// it's been fetched. See `matrix_bridge::sender_avatar`.
     pub avatar: Option<Vec<u8>>,
+    /// Decoded-by-GTK image bytes for an inline Matrix image or video
+    /// thumbnail. The SDK downloads, decrypts, and caches these before the
+    /// GTK thread receives the message.
+    pub media_preview: Option<Vec<u8>>,
     pub body: String,
     pub ts_millis: i64,
     pub own: bool,
