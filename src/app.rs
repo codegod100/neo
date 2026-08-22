@@ -697,10 +697,10 @@ impl AppModel {
         self.active_room_summary().map(|r| r.name.clone()).unwrap_or_else(|| "Room".to_owned())
     }
 
-    /// The room's Matrix ID (e.g. `!abc123:example.org`), shown under the
-    /// channel name so users can find/share the room's real address.
+    /// The room's canonical/alternate Matrix alias when available (e.g.
+    /// `#developers:matrix.org`), falling back to its opaque room ID.
     fn active_room_address(&self) -> String {
-        self.active_room_summary().map(|r| r.id.clone()).unwrap_or_default()
+        self.active_room_summary().map(|r| r.address.clone()).unwrap_or_default()
     }
 
     /// Every `MatrixEvent::Timeline` is a full, already-deduplicated snapshot

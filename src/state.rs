@@ -48,6 +48,10 @@ impl ConnectionState {
 pub struct RoomSummary {
     pub id: String,
     pub name: String,
+    /// Human-shareable Matrix alias when the room publishes one, otherwise
+    /// the opaque room ID (for example `#developers:matrix.org` instead of
+    /// `!abcdef:matrix.org`).
+    pub address: String,
     pub preview: String,
     pub encrypted: bool,
     pub direct: bool,

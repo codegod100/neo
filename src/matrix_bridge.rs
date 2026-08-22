@@ -205,8 +205,6 @@ impl ActiveSync {
         let Ok(rid) = RoomId::parse(&room_id) else { return };
         let Some(room) = client.get_room(&rid) else { return };
 
-        self.service.room_list_service().subscribe_to_rooms(&[&rid]).await;
-
         let timeline = match room.timeline().await {
             Ok(t) => Arc::new(t),
             Err(err) => {
@@ -217,6 +215,12 @@ impl ActiveSync {
         let (initial, diff_stream) = timeline.subscribe().await;
         let client_for_avatars = timeline.room().client();
         self.active_timeline = Some(timeline);
+
+        // Build and subscribe the Timeline before requesting the larger room
+        // subscription. Timeline construction attaches the SDK event cache to
+        // sync responses; doing this in the opposite order races a fast sync
+        // response and can leave a newly-opened room permanently blank.
+        self.service.room_list_service().subscribe_to_rooms(&[&rid]).await;
 
         self.timeline_task = Some(tokio::spawn(async move {
             let mut items = initial;
@@ -650,6 +654,11 @@ async fn room_summary(room: &Room) -> RoomSummary {
         .await
         .map(|n| n.to_string())
         .unwrap_or_else(|_| room.room_id().to_string());
+    let address = room
+        .canonical_alias()
+        .or_else(|| room.alt_aliases().into_iter().next())
+        .map(|alias| alias.to_string())
+        .unwrap_or_else(|| room.room_id().to_string());
     let is_space = room.is_space();
     // Only spaces need their avatar today (for the filter chips above the
     // room list), so skip the download for every other room.
@@ -657,6 +666,7 @@ async fn room_summary(room: &Room) -> RoomSummary {
     RoomSummary {
         id: room.room_id().to_string(),
         name,
+        address,
         preview: String::new(),
         encrypted: room.encryption_state().is_encrypted(),
         direct: room.is_direct().await.unwrap_or(false),
