@@ -289,13 +289,36 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                       </object>
                     </child>
                     <child>
-                      <object class="GtkScrolledWindow">
+                      <object class="GtkScrolledWindow" id="room_scroller">
                         <property name="vexpand">true</property>
                         <property name="child">
                           <object class="GtkBox" id="room_mount">
                             <property name="orientation">1</property>
                           </object>
                         </property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="rooms_loading">
+                        <property name="orientation">1</property>
+                        <property name="spacing">8</property>
+                        <property name="visible">false</property>
+                        <property name="vexpand">true</property>
+                        <property name="valign">3</property>
+                        <property name="halign">3</property>
+                        <child>
+                          <object class="GtkSpinner">
+                            <property name="spinning">true</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label">Loading channels…</property>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>
@@ -500,6 +523,16 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                                     <property name="child">
                                       <object class="GtkBox" id="message_mount">
                                         <property name="orientation">1</property>
+                                        <child>
+                                          <object class="GtkSpinner" id="older_messages_spinner">
+                                            <property name="visible">false</property>
+                                            <property name="spinning">true</property>
+                                            <property name="halign">3</property>
+                                            <property name="margin-top">8</property>
+                                            <property name="margin-bottom">8</property>
+                                            <property name="tooltip-text">Loading older messages</property>
+                                          </object>
+                                        </child>
                                       </object>
                                     </property>
                                   </object>

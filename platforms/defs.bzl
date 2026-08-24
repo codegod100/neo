@@ -1,7 +1,6 @@
 # Execution platforms for BuildBuddy cache-only and remote-execution modes.
-# The remote platform executes directly on a persistent Nix-enabled worker.
-# Snowydeer supplies the pinned toolchain and /opt/neo-nix exposes the same
-# closure to Cargo build scripts which discover native tools via PATH.
+# Remote actions run on BuildBuddy's hosted workers in Neo's pinned image,
+# which supplies Rust, Blueprint, GTK, and the native build dependencies.
 #
 # These are selected via `execution_platforms` in .buckconfig.local (machine-
 # local, gitignored). The tracked .buckconfig remains fully local so a plain
@@ -65,15 +64,7 @@ def _buildbuddy_execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
             allow_cache_uploads = True,
             remote_execution_properties = {
                 "OSFamily": "Linux",
-                "Pool": "neo-rbe",
-                "env-overrides": ",".join([
-                    "PATH=/opt/neo-nix/bin:/root/.nix-profile/bin:/usr/bin:/bin",
-                    "PKG_CONFIG_PATH=/opt/neo-nix/lib/pkgconfig:/opt/neo-nix/share/pkgconfig",
-                    "LIBRARY_PATH=/opt/neo-nix/lib",
-                    "CPATH=/opt/neo-nix/include",
-                ]),
-                "workload-isolation-type": "none",
-                "use-self-hosted-executors": "true",
+                "container-image": "docker://ghcr.io/codegod100/neo-rbe@sha256:1ac882109e2329bb53333bf4f93326ff2d1695c18a0f6fb7270496e11a3f1ae2",
             },
             remote_execution_use_case = "buck2-default",
             remote_output_paths = "output_paths",

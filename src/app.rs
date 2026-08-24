@@ -69,7 +69,7 @@ pub struct AppModel {
     rooms_empty_hint: Option<String>,
     /// True from a successful login until the first room list lands, so the
     /// rooms screen (which now appears right after authentication succeeds,
-    /// before that first sync finishes) shows "Loading rooms…" instead of
+    /// before that first sync finishes) shows a loading indicator instead of
     /// the misleading "No rooms yet" empty state.
     loading_rooms: bool,
     active_room: Option<String>,
@@ -541,7 +541,11 @@ impl AppModel {
 
         self.ui.rooms_user.set_label(self.user_id.as_deref().unwrap_or(""));
         self.ui.lobby_button.set_visible(self.active_space.is_some());
-        self.ui.rooms_empty.set_visible(self.rooms_empty_hint.is_some());
+        self.ui.room_scroller.set_visible(!self.loading_rooms);
+        self.ui.rooms_loading.set_visible(self.loading_rooms);
+        self.ui
+            .rooms_empty
+            .set_visible(!self.loading_rooms && self.rooms_empty_hint.is_some());
         self.ui.rooms_empty.set_label(self.rooms_empty_hint.as_deref().unwrap_or(""));
         self.ui
             .lobby_stack
@@ -555,6 +559,9 @@ impl AppModel {
         self.ui
             .message_stack
             .set_visible_child_name(if self.loading_messages { "loading" } else { "messages" });
+        self.ui.older_messages_spinner.set_visible(
+            self.loading_older.as_deref() == self.active_room.as_deref(),
+        );
 
         self.ui.settings_user.set_subtitle(self.user_id.as_deref().unwrap_or("—"));
         self.ui
@@ -591,10 +598,9 @@ impl AppModel {
                 self.password_buf.set_text("");
                 // The room list hasn't loaded yet at this point (the bridge
                 // reports LoggedIn as soon as auth succeeds, before its
-                // first sync) — show "Loading rooms…" instead of the
-                // steady-state "No rooms yet" empty hint for that gap.
+                // first sync) — show the loading indicator instead of the
+                // steady-state empty hint for that gap.
                 self.loading_rooms = true;
-                self.rooms_empty_hint = Some("Loading rooms…".to_owned());
                 self.toaster.add_toast(adw::Toast::new("Signed in"));
             }
             MatrixEvent::LoginFailed(err) => {

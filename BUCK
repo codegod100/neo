@@ -22,7 +22,14 @@
 # embedding doesn't carry `-L` along with it, so the actual link step below
 # needs the Nix environment's unified library path passed explicitly.
 GTK4_LIB_DIRS = [
-    "-L/home/linuxbrew/.linuxbrew/lib",
+    "-L/nix/store/8g01hy2crkmnjb5v1b6nmgbfrs6y4h39-gtk4-4.22.4/lib",
+    "-L/nix/store/8hsq7gjh01g3ssi81rvwyyjlx7bj0ppv-libadwaita-1.9.3/lib",
+    "-L/nix/store/wpwksxna2lp2y0px8xnxwgs0rfary570-glib-2.88.3/lib",
+    "-L/nix/store/x1ch4nykvydrxgf650s4rrrfi4n03gil-pango-1.57.1/lib",
+    "-L/nix/store/yx1n1yx1zzk09pw7cbivvbsb5z7q45ci-harfbuzz-13.2.1/lib",
+    "-L/nix/store/xwmccxlk1hnmbkrigdnxgjh7caljkcfp-cairo-1.18.4/lib",
+    "-L/nix/store/9qkivj7kz2zh9s847aklqlr0nb4g5yql-graphene-1.10.8/lib",
+    "-L/nix/store/0y9x1nyg7wzdj3illkajsyh6ajrxbw3s-gdk-pixbuf-2.44.7/lib",
 ]
 
 ARELM_ROOT = read_root_config("neo", "arelm_root", "../arelm")

@@ -202,11 +202,24 @@ Box app_content {
             visible: false;
             styles ["flat"]
           }
-          ScrolledWindow {
+          ScrolledWindow room_scroller {
             vexpand: true;
             child: Box room_mount {
               orientation: vertical;
             };
+          }
+          Box rooms_loading {
+            orientation: vertical;
+            spacing: 8;
+            visible: false;
+            vexpand: true;
+            valign: center;
+            halign: center;
+            Spinner { spinning: true; }
+            Label {
+              label: "Loading channels…";
+              styles ["dim-label"]
+            }
           }
           Label rooms_empty {
             visible: false;
@@ -338,6 +351,14 @@ Box app_content {
                   vscrollbar-policy: automatic;
                   child: Box message_mount {
                     orientation: vertical;
+                    Spinner older_messages_spinner {
+                      visible: false;
+                      spinning: true;
+                      halign: center;
+                      margin-top: 8;
+                      margin-bottom: 8;
+                      tooltip-text: "Loading older messages";
+                    }
                   };
                 }
                 Button jump_to_present {

@@ -143,21 +143,10 @@ project builds — there's no `cargo build` fallback:
 buck2 build //:neo   # or: buck2 run //:neo
 ```
 
-The remote execution platform uses a persistent, bare BuildBuddy worker rather
-than an OCI image. A Snowydeer-derived `nix_build` rule realizes the pinned
-environment on that worker and exposes Buck-managed Rust tool launchers; native
-tools found by Cargo build scripts use the same closure through
-`/opt/neo-nix`. To update the worker after changing `nix/flake.nix` or
-`nix/flake.lock`:
-
-```sh
-bash nix/deploy-rbe.sh
-```
-
-Override `RBE_HOST`, `RBE_FLAKE_DIR`, or `RBE_NIX_PROFILE` when deploying a
-different executor. The checked-in `nix/buildbuddy-executor.service` is the
-corresponding systemd unit; its credential file must define
-`BUILDBUDDY_EXECUTOR_API_KEY` with mode `0600`.
+The remote execution platform uses BuildBuddy-hosted workers with Neo's
+digest-pinned `ghcr.io/codegod100/neo-rbe` image. The image supplies Rust,
+Blueprint, GTK, and the native build dependencies while BuildBuddy owns and
+scales the executor fleet.
 
 `Cargo.toml`/`Cargo.lock` are never built from directly — they exist purely
 as [reindeer](https://github.com/facebookincubator/reindeer)'s

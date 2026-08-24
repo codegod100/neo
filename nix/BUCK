@@ -8,10 +8,8 @@ filegroup(
     ]),
 )
 
-# Snowydeer normally realizes this locally because its absolute /nix/store
-# output must exist where consuming actions execute. Neo intentionally realizes
-# it remotely: all consumers are forced onto the single persistent neo-rbe pool,
-# whose bare runner and Nix store are shared.
+# Snowydeer realizes this on the same BuildBuddy execution platform as its
+# consumers, making the pinned toolchain available to remote actions.
 nix_build(
     name = "environment",
     attr = "neo-rbe-env",

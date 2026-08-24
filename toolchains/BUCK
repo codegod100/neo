@@ -73,22 +73,22 @@ system_cxx_toolchain(
     archiver = select({
         "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
         "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
-        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/llvm-ar",
+        "DEFAULT": "/bin/ar",
     }),
     compiler = select({
         "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang",
         "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang",
-        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/clang",
+        "DEFAULT": "/bin/clang",
     }),
     cxx_compiler = select({
         "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
         "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
-        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/clang++",
+        "DEFAULT": "/bin/clang++",
     }),
     linker = select({
         "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
         "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
-        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/clang++",
+        "DEFAULT": "/bin/clang++",
     }),
     visibility = ["PUBLIC"],
 )
@@ -268,8 +268,6 @@ system_rust_toolchain(
         "root//platforms:is-android-x86_64": [],
         "DEFAULT": [
             "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
-            "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",
-            "-Clink-arg=-Wl,-rpath,/home/linuxbrew/.linuxbrew/lib",
         ],
     }),
     rustc_target_triple = select({
@@ -279,8 +277,6 @@ system_rust_toolchain(
     }),
     rustc_test_flags = [
         "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
-        "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",
-        "-Clink-arg=-Wl,-rpath,/home/linuxbrew/.linuxbrew/lib",
     ],
     visibility = ["PUBLIC"],
 )
