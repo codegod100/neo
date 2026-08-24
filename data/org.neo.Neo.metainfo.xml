@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.neo.Neo</id>
+  <name>Neo</name>
+  <summary>Matrix chat client</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>A Matrix chat client built with Relm4 and libadwaita.</p>
+  </description>
+</component>

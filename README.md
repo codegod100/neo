@@ -56,6 +56,37 @@ read-receipts for free.
 buck2 run //:neo
 ```
 
+## Android APK
+
+Neo uses the reusable Arelm/Pixiewood support checkout next to this repository.
+The Android build compiles `//:neo-lib[cdylib]`, whose exported C entrypoint is
+loaded by GTK's Android runtime. Neo continues to own its package ID, metadata,
+icon, UI, and application logic.
+
+With Arelm checked out at `../arelm`, the Android SDK selected, and Pixiewood's
+prerequisites installed:
+
+```sh
+python3 build-scripts/build-android.py --android-home "$ANDROID_HOME"
+```
+
+The generated APKs are written beneath
+`.pixiewood/android/app/build/outputs/apk/`. The Meson `arelm_root` option
+defaults to `../arelm` and can be overridden by build-system integrations that
+place the support checkout elsewhere.
+
+Use the wrapper rather than invoking Pixiewood's three commands directly:
+Pixiewood currently has no manifest option for Android permissions, so the
+wrapper adds `android.permission.INTERNET` after generation. Without it,
+Matrix homeserver discovery and SSO fail before any browser flow can start.
+
+The corresponding Buck targets can be checked independently:
+
+```sh
+buck2 build --target-platforms //platforms:android-aarch64 //:neo-lib[cdylib]
+buck2 build --target-platforms //platforms:android-x86_64 //:neo-lib[cdylib]
+```
+
 The application layout is authored in `src/ui/app.blp`. After changing it,
 regenerate the checked-in Builder XML and validate the Buck target:
 

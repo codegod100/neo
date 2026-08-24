@@ -19,6 +19,28 @@ use crate::matrix_bridge::{self, MatrixCmd, MatrixEvent};
 use crate::state::{ChatMessage, ConnectionState, LobbyRoom, RoomSummary, Screen};
 use crate::ui::AppUi;
 
+fn open_uri(uri: &str, root: &gtk::Box) {
+    #[cfg(target_os = "android")]
+    if let Err(error) = crate::android::open_uri(uri, root) {
+        crate::android::log(&format!("failed to open Android URI: {error}"));
+        log::warn!("failed to open Android URI: {error}");
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+    let launcher = gtk::UriLauncher::new(uri);
+    launcher.launch(
+        None::<&gtk::Window>,
+        None::<&gtk::gio::Cancellable>,
+        |result| {
+            if let Err(error) = result {
+                log::warn!("failed to open URI: {error}");
+            }
+        },
+    );
+    }
+}
+
 pub struct AppModel {
     cmd_tx: tokio::sync::mpsc::UnboundedSender<MatrixCmd>,
 
@@ -319,7 +341,7 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::ReopenSso => {
                 if let Some(url) = &self.sso_url {
-                    let _ = open::that_detached(url);
+                    open_uri(url, &self.ui.root);
                 }
             }
             AppMsg::CancelSso => {
@@ -432,6 +454,24 @@ impl AppModel {
         clicked!(self.ui.settings_back, AppMsg::Back);
         clicked!(self.ui.logout_button, AppMsg::Logout);
 
+        for entry in [
+            &self.ui.homeserver_entry,
+            &self.ui.username_entry,
+            &self.ui.password_entry,
+            &self.ui.compose_entry,
+            &self.ui.room_filter,
+        ] {
+            entry.set_icon_from_icon_name(
+                gtk::EntryIconPosition::Secondary,
+                Some("edit-clear-symbolic"),
+            );
+            entry.connect_icon_release(|entry, position| {
+                if position == gtk::EntryIconPosition::Secondary {
+                    entry.set_text("");
+                }
+            });
+        }
+
         {
             let sender = sender.clone();
             self.ui.password_entry.connect_activate(move |_| sender.input(AppMsg::Login));
@@ -517,10 +557,12 @@ impl AppModel {
                 self.error = None;
             }
             MatrixEvent::SsoUrl(url) => {
+                #[cfg(target_os = "android")]
+                crate::android::log("received Matrix SSO URL");
                 // Best-effort auto-open; the connect screen also shows `url`
                 // as a fallback link/"Open again" button in case there's no
                 // default browser configured (e.g. sandboxed/headless).
-                let _ = open::that_detached(&url);
+                open_uri(&url, &self.ui.root);
                 self.sso_url = Some(url);
             }
             MatrixEvent::LoggedIn { user_id, homeserver } => {

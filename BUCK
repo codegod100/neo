@@ -22,8 +22,46 @@
 # embedding doesn't carry `-L` along with it, so the actual link step below
 # needs the Nix environment's unified library path passed explicitly.
 GTK4_LIB_DIRS = [
-    "-L/opt/neo-nix/lib",
+    "-L/home/linuxbrew/.linuxbrew/lib",
 ]
+
+ARELM_ROOT = read_root_config("neo", "arelm_root", "../arelm")
+
+ANDROID_AARCH64_LIB_DIRS = [
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/gtk/gtk",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/libadwaita/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/glib/glib",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/glib/gobject",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/glib/gio",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/pango/pango",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/harfbuzz/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/cairo/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/cairo/util/cairo-gobject",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/gdk-pixbuf/gdk-pixbuf",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/graphene/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/proxy-libintl-0.5",
+]
+
+ANDROID_X86_64_LIB_DIRS = [
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/gtk/gtk",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/libadwaita/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/glib/glib",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/glib/gobject",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/glib/gio",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/pango/pango",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/harfbuzz/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/cairo/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/cairo/util/cairo-gobject",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/gdk-pixbuf/gdk-pixbuf",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/graphene/src",
+    "-L" + ARELM_ROOT + "/.pixiewood/bin-x86_64/subprojects/proxy-libintl-0.5",
+]
+
+PLATFORM_LIB_DIRS = select({
+    "//platforms:is-android-aarch64": ANDROID_AARCH64_LIB_DIRS,
+    "//platforms:is-android-x86_64": ANDROID_X86_64_LIB_DIRS,
+    "DEFAULT": GTK4_LIB_DIRS,
+})
 
 # buck2 has no built-in cargo-style dev/release profile concept - `buck2
 # build --config neo.release=true //:neo` mirrors cargo's `--release`
@@ -43,10 +81,10 @@ DEPS = [
     "//third-party:env_logger",
     "//third-party:eyeball-im",
     "//third-party:futures-util",
+    "//third-party:jni",
     "//third-party:log",
     "//third-party:matrix-sdk",
     "//third-party:matrix-sdk-ui",
-    "//third-party:open",
     "//third-party:relm4",
     "//third-party:rusqlite",
     "//third-party:serde",
@@ -54,6 +92,8 @@ DEPS = [
     "//third-party:tokio",
     "//third-party:url",
 ]
+
+NEO_SRCS = glob(["src/**/*.rs"]) + ["src/ui/app.ui"]
 
 # Validates the authoritative Blueprint source and produces the same Builder XML
 # checked in at `src/ui/app.ui`. The checked-in copy is what `include_str!` embeds
@@ -66,17 +106,28 @@ genrule(
     cmd = "blueprint-compiler compile --output $OUT $SRCS",
 )
 
-rust_binary(
-    name = "neo",
+rust_library(
+    name = "neo-lib",
     # `app.ui` is generated from `app.blp` with blueprint-compiler and read by
     # `src/ui.rs` through include_str!, so it must be an explicit sandbox input.
-    srcs = glob(["src/**/*.rs"]) + ["src/ui/app.ui"],
+    srcs = NEO_SRCS,
+    crate = "neo",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    rustc_flags = PLATFORM_LIB_DIRS + RUSTC_RELEASE_FLAGS,
+    visibility = ["PUBLIC"],
+    deps = DEPS,
+)
+
+rust_binary(
+    name = "neo",
+    srcs = ["src/main.rs"],
     crate = "neo",
     crate_root = "src/main.rs",
     edition = "2021",
-    rustc_flags = GTK4_LIB_DIRS + RUSTC_RELEASE_FLAGS,
+    rustc_flags = PLATFORM_LIB_DIRS + RUSTC_RELEASE_FLAGS,
     visibility = ["PUBLIC"],
-    deps = DEPS,
+    deps = [":neo-lib"],
 )
 
 # `buck2 test //:neo-test` - replaces `cargo test`. Same crate_root/srcs as
@@ -90,10 +141,10 @@ rust_binary(
 # real dev-dependency.
 rust_test(
     name = "neo-test",
-    srcs = glob(["src/**/*.rs"]) + ["src/ui/app.ui"],
+    srcs = NEO_SRCS,
     crate = "neo",
-    crate_root = "src/main.rs",
+    crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_flags = GTK4_LIB_DIRS,
+    rustc_flags = GTK4_LIB_DIRS + [],
     deps = DEPS + ["//third-party:wiremock"],
 )

@@ -28,3 +28,7 @@
 
 # Delta's local worktree/clone store. Never commit.
 /.delta/
+
+# Pixiewood's generated cross-build and Gradle trees.
+/.pixiewood
+/subprojects

@@ -42,7 +42,7 @@ load("@prelude//toolchains:remote_test_execution.bzl", "remote_test_execution_to
 load("@prelude//toolchains:zip_file.bzl", "zip_file_toolchain")
 load("@prelude//toolchains/go:system_go_bootstrap_toolchain.bzl", "system_go_bootstrap_toolchain")
 load("@prelude//toolchains/go:system_go_toolchain.bzl", "system_go_toolchain")
-load("@root//snowydeer:nix_rust_toolchain.bzl", "nix_rust_toolchain")
+load("@prelude//toolchains:rust.bzl", "system_rust_toolchain")
 load(":defs.bzl", "android_hack_alias")
 
 android_sdk_tools(
@@ -70,9 +70,26 @@ android_hack_alias(
 
 system_cxx_toolchain(
     name = "cxx",
-    archiver = "/opt/neo-nix/bin/ar",
-    compiler = "/opt/neo-nix/bin/clang",
-    cxx_compiler = "/opt/neo-nix/bin/clang++",
+    archiver = select({
+        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
+        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
+        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/llvm-ar",
+    }),
+    compiler = select({
+        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang",
+        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang",
+        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/clang",
+    }),
+    cxx_compiler = select({
+        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
+        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
+        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/clang++",
+    }),
+    linker = select({
+        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
+        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
+        "DEFAULT": "/home/linuxbrew/.linuxbrew/bin/clang++",
+    }),
     visibility = ["PUBLIC"],
 )
 
@@ -243,15 +260,23 @@ system_python_wheel_toolchain(
     visibility = ["PUBLIC"],
 )
 
-nix_rust_toolchain(
+system_rust_toolchain(
     name = "rust",
     default_edition = "2021",
-    nix_rust = "root//nix:environment",
-    rustc_binary_flags = [
-        "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
-        "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",
-        "-Clink-arg=-Wl,-rpath,/home/linuxbrew/.linuxbrew/lib",
-    ],
+    rustc_binary_flags = select({
+        "root//platforms:is-android-aarch64": [],
+        "root//platforms:is-android-x86_64": [],
+        "DEFAULT": [
+            "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+            "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",
+            "-Clink-arg=-Wl,-rpath,/home/linuxbrew/.linuxbrew/lib",
+        ],
+    }),
+    rustc_target_triple = select({
+        "root//platforms:is-android-aarch64": "aarch64-linux-android",
+        "root//platforms:is-android-x86_64": "x86_64-linux-android",
+        "DEFAULT": "x86_64-unknown-linux-gnu",
+    }),
     rustc_test_flags = [
         "-Clink-arg=-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
         "-Clink-arg=-Wl,-rpath,/opt/neo-nix/lib",

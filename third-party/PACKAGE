@@ -1,0 +1,9 @@
+load("@prelude//rust:cargo_package.bzl", "set_reindeer_platforms")
+
+set_reindeer_platforms(
+    select({
+        "DEFAULT": "linux-x86_64",
+        "//platforms:is-android-aarch64": "android-aarch64",
+        "//platforms:is-android-x86_64": "android-x86_64",
+    }),
+)

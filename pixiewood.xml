@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<app xmlns="https://sp1rit.arpa/pixiewood/" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <metainfo vercalc="count">
+    <xi:include href="build://aarch64/org.neo.Neo.metainfo.xml" parse="xml"/>
+  </metainfo>
+  <style>
+    <theme name="adwaita"/>
+    <icon type="generate">
+      <drawable target="foreground" type="avd" path="src://data/icons/neo-foreground.xml"/>
+      <color target="background">#3584e4</color>
+      <drawable target="monochrome" type="avd" path="src://data/icons/neo-foreground.xml"/>
+    </icon>
+  </style>
+  <dependencies>
+    <glib><patch>hack</patch></glib>
+    <fontconfig/>
+    <gtk/>
+    <libadwaita/>
+  </dependencies>
+  <build target="neo">
+    <architectures>
+      <arch>aarch64</arch>
+      <arch>x86_64</arch>
+    </architectures>
+  </build>
+</app>

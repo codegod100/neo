@@ -1,0 +1,6 @@
+option(
+  'arelm_root',
+  type: 'string',
+  value: '../arelm',
+  description: 'Path to the reusable Arelm support checkout',
+)

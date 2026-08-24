@@ -1,6 +1,40 @@
 load("@prelude//platforms:defs.bzl", "host_configuration")
 load(":defs.bzl", "buildbuddy_execution_platform", "cache_execution_platform")
 
+config_setting(
+    name = "is-android-aarch64",
+    constraint_values = [
+        "prelude//os/constraints:os[android]",
+        "prelude//cpu/constraints:cpu[arm64]",
+    ],
+)
+
+config_setting(
+    name = "is-android-x86_64",
+    constraint_values = [
+        "prelude//os/constraints:os[android]",
+        "prelude//cpu/constraints:cpu[x86_64]",
+    ],
+)
+
+platform(
+    name = "android-aarch64",
+    constraint_values = [
+        "prelude//os/constraints:os[android]",
+        "prelude//cpu/constraints:cpu[arm64]",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "android-x86_64",
+    constraint_values = [
+        "prelude//os/constraints:os[android]",
+        "prelude//cpu/constraints:cpu[x86_64]",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 # Same as prelude//platforms:default, plus remote cache read/write against
 # BuildBuddy. Opt in via `execution_platforms = root//platforms:cache` in
 # .buckconfig.local. See defs.bzl for why remote *execution* stays off.

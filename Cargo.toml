@@ -15,6 +15,11 @@ publish = false
 name = "neo"
 path = "src/main.rs"
 
+[lib]
+name = "neo"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
@@ -23,6 +28,7 @@ env_logger = "0.11.11"
 log = "0.4.33"
 eyeball-im = "0.7"
 futures-util = "0.3"
+jni = "0.21"
 # `testing` (normally a dev-only feature) is enabled unconditionally: reindeer
 # only buckifies a package's dev-dependencies for a Cargo `test`-kind target
 # ([[test]]/tests/*.rs), and neo is bin-only with its tests living inline in
@@ -34,13 +40,12 @@ futures-util = "0.3"
 # but changes nothing at runtime - see BUCK's `neo-test` rust_test target.
 matrix-sdk = { version = "0.13", default-features = false, features = ["sqlite", "rustls-tls", "e2e-encryption", "automatic-room-key-forwarding", "sso-login", "testing"] }
 matrix-sdk-ui = { version = "0.13.0", default-features = false, features = ["rustls-tls"] }
-open = "5.3.2"
 relm4 = { version = "0.11", default-features = false, features = ["macros", "libadwaita", "gnome_47"] }
 # Already pulled in transitively by matrix-sdk-sqlite; taken directly for the
 # one-time legacy-store migration in matrix_bridge.rs (see
 # `scrub_legacy_to_device_token`). No default features — reuses whatever
 # libsqlite3-sys build matrix-sdk-sqlite already resolves to.
-rusqlite = { version = "0.35.0", default-features = false }
+rusqlite = { version = "0.35.0", default-features = false, features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
