@@ -77,7 +77,10 @@ pub struct AppModel {
     /// True while a `LoadOlder` pagination request is in flight, so the
     /// scroll-position handler below doesn't fire another one on every
     /// intermediate scroll event while we're already waiting on one.
-    loading_older: bool,
+    /// Room whose backwards-pagination request is in flight. Tracking the room
+    /// (rather than a global bool) also prevents a late completion from a room
+    /// the user left from unlocking pagination in the newly-opened room.
+    loading_older: Option<String>,
     /// True from opening a room until its first timeline fetch lands, so the
     /// room screen can show a spinner instead of a blank scroller — replaces
     /// the (already-cached) messages for a room you've visited before, no
@@ -252,7 +255,7 @@ impl SimpleComponent for AppModel {
             loading_rooms: false,
             active_room: None,
             messages: HashMap::new(),
-            loading_older: false,
+            loading_older: None,
             loading_messages: false,
             message_vadj: None,
             restore_scroll_anchor: Rc::new(Cell::new(None)),
@@ -409,10 +412,12 @@ impl SimpleComponent for AppModel {
                 // intermediate scroll event while still near the top and a
                 // request is already in flight — the manual button used to
                 // get this for free from `set_sensitive: !loading_older`.
-                if !self.loading_older {
+                if self.loading_older.is_none() {
                     if let Some(room_id) = self.active_room.clone() {
-                        self.loading_older = true;
-                        let _ = self.cmd_tx.send(MatrixCmd::LoadOlder(room_id));
+                        self.loading_older = Some(room_id.clone());
+                        if self.cmd_tx.send(MatrixCmd::LoadOlder(room_id)).is_err() {
+                            self.loading_older = None;
+                        }
                     }
                 }
             }
@@ -620,6 +625,11 @@ impl AppModel {
             MatrixEvent::Timeline { room_id, messages } => {
                 self.apply_timeline(room_id, messages);
             }
+            MatrixEvent::OlderLoaded { room_id } => {
+                if self.loading_older.as_deref() == Some(room_id.as_str()) {
+                    self.loading_older = None;
+                }
+            }
             MatrixEvent::SendFailed { room_id: _, error } => {
                 self.toaster.add_toast(adw::Toast::new(&format!("Send failed: {error}")));
             }
@@ -714,6 +724,8 @@ impl AppModel {
     /// timeline. Shared by the normal joined-channel list and the Lobby
     /// directory's "already joined" rows.
     fn open_room(&mut self, id: String) {
+        self.loading_older = None;
+        self.restore_scroll_anchor.set(None);
         self.active_room = Some(id.clone());
         self.screen = Screen::Room;
         let has_cache = self.messages.get(&id).is_some_and(|m| !m.is_empty());
@@ -750,8 +762,9 @@ impl AppModel {
     /// `eyeball_im::Vector` on every diff), so there's no merge/dedup logic
     /// needed here anymore — just replace.
     fn apply_timeline(&mut self, room_id: String, incoming: Vec<ChatMessage>) {
-        let was_loading_older = self.loading_older;
-        self.loading_older = false;
+        let previous_len = self.messages.get(&room_id).map_or(0, Vec::len);
+        let added_history = self.loading_older.as_deref() == Some(room_id.as_str())
+            && incoming.len() > previous_len;
         self.messages.insert(room_id.clone(), incoming);
 
         if self.active_room.as_deref() == Some(room_id.as_str()) {
@@ -759,7 +772,7 @@ impl AppModel {
             // See `restore_scroll_anchor`'s doc comment: snapshot the
             // scroller's current position now, before `sync_messages`
             // rebuilds the list with older history prepended.
-            if was_loading_older {
+            if added_history && self.restore_scroll_anchor.get().is_none() {
                 if let Some(vadj) = &self.message_vadj {
                     self.restore_scroll_anchor.set(Some((vadj.upper(), vadj.value())));
                 }
@@ -792,6 +805,8 @@ impl AppModel {
         self.loading_rooms = false;
         self.active_room = None;
         self.messages.clear();
+        self.loading_older = None;
+        self.restore_scroll_anchor.set(None);
         self.loading_messages = false;
         self.spaces.clear();
         self.space_children.clear();

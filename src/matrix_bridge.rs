@@ -114,6 +114,11 @@ pub enum MatrixEvent {
     },
     /// A full snapshot of the currently-open room's timeline, oldest first.
     Timeline { room_id: String, messages: Vec<ChatMessage> },
+    /// A backwards-pagination request finished, whether or not it found any
+    /// events. Kept separate from `Timeline`: unrelated live/profile diffs can
+    /// arrive while pagination is in flight and must not unlock another
+    /// concurrent `paginate_backwards` call.
+    OlderLoaded { room_id: String },
     SendFailed { room_id: String, error: String },
     /// A space's full room directory, fetched via `/hierarchy` for its
     /// "Lobby" screen — `rooms` excludes the space's own row.
@@ -354,6 +359,7 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                                         if let Err(e) = timeline.paginate_backwards(40).await {
                                             let _ = evt_tx.send(MatrixEvent::Error(format!("paginate: {e}")));
                                         }
+                                        let _ = evt_tx.send(MatrixEvent::OlderLoaded { room_id });
                                     });
                                 }
                             }

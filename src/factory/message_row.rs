@@ -109,7 +109,13 @@ impl FactoryComponent for MessageRow {
                         set_wrap_mode: gtk::pango::WrapMode::WordChar,
                         set_max_width_chars: 42,
                         set_xalign: 0.0,
-                        set_selectable: true,
+                        // A selectable label owns keyboard focus. Pagination
+                        // clears and rebuilds this factory; GTK's Android
+                        // backend recursively calls `gtk_widget_child_focus`
+                        // when the focused label disappears and eventually
+                        // segfaults. Links remain pointer/touch-activatable
+                        // without selection, while desktop keeps copy support.
+                        set_selectable: !cfg!(target_os = "android"),
                     },
                 },
 
