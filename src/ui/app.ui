@@ -479,6 +479,12 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                       </object>
                     </child>
                     <child>
+                      <object class="GtkEntry" id="message_filter">
+                        <property name="placeholder-text">Search loaded messages…</property>
+                        <property name="primary-icon-name">system-search-symbolic</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkStack" id="message_stack">
                         <property name="vexpand">true</property>
                         <property name="transition-type">1</property>
@@ -544,6 +550,16 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                                     <property name="visible">false</property>
                                     <style>
                                       <class name="pill"/>
+                                    </style>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel" id="message_search_empty">
+                                    <property name="label">No loaded messages match your search.</property>
+                                    <property name="visible">false</property>
+                                    <property name="margin-top">24</property>
+                                    <style>
+                                      <class name="dim-label"/>
                                     </style>
                                   </object>
                                 </child>

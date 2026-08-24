@@ -323,6 +323,10 @@ Box app_content {
               }
             }
           }
+          Entry message_filter {
+            placeholder-text: "Search loaded messages…";
+            primary-icon-name: "system-search-symbolic";
+          }
           Stack message_stack {
             vexpand: true;
             transition-type: crossfade;
@@ -366,6 +370,12 @@ Box app_content {
                   halign: center;
                   visible: false;
                   styles ["pill"]
+                }
+                Label message_search_empty {
+                  label: "No loaded messages match your search.";
+                  visible: false;
+                  margin-top: 24;
+                  styles ["dim-label"]
                 }
               };
             }

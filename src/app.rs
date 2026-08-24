@@ -12,7 +12,9 @@ use relm4::factory::FactoryVecDeque;
 use relm4::prelude::*;
 
 use crate::factory::lobby_row::{LobbyRoomRow, LobbyRoomRowOutput};
-use crate::factory::message_row::{format_day_label, local_day, MessageRow, TimelineRow};
+use crate::factory::message_row::{
+    format_day_label, local_day, MessageRow, MessageRowInput, MessageRowOutput, TimelineRow,
+};
 use crate::factory::room_row::{RoomRow, RoomRowOutput};
 use crate::factory::space_chip::{SpaceChip, SpaceChipInput, SpaceChipOutput};
 use crate::matrix_bridge::{self, MatrixCmd, MatrixEvent};
@@ -74,6 +76,8 @@ pub struct AppModel {
     loading_rooms: bool,
     active_room: Option<String>,
     messages: HashMap<String, Vec<ChatMessage>>,
+    message_filter_buf: gtk::EntryBuffer,
+    message_search_empty: bool,
     /// True while a `LoadOlder` pagination request is in flight, so the
     /// scroll-position handler below doesn't fire another one on every
     /// intermediate scroll event while we're already waiting on one.
@@ -153,6 +157,10 @@ pub enum AppMsg {
     // Room screen
     Back,
     Send,
+    MessageFilterChanged,
+    OpenMessageInTimeline(String),
+    HighlightMessage(String),
+    RevealMessage(f64),
     JumpToPresent,
     /// Auto-triggered by the message scroller nearing the top of the loaded
     /// history — see the `connect_value_changed` handler wired up in `init`.
@@ -214,12 +222,19 @@ impl SimpleComponent for AppModel {
                 LobbyRoomRowOutput::Join(id) => AppMsg::LobbyJoinRoom(id),
             },
         );
-        let message_factory = FactoryVecDeque::builder().launch_default().detach();
+        let message_factory = FactoryVecDeque::builder().launch_default().forward(
+            sender.input_sender(),
+            |out| match out {
+                MessageRowOutput::OpenInTimeline(id) => AppMsg::OpenMessageInTimeline(id),
+                MessageRowOutput::RevealPosition(y) => AppMsg::RevealMessage(y),
+            },
+        );
 
         let homeserver_buf = gtk::EntryBuffer::new(Some("matrix.org"));
         let username_buf = gtk::EntryBuffer::default();
         let password_buf = gtk::EntryBuffer::default();
         let room_filter_buf = gtk::EntryBuffer::default();
+        let message_filter_buf = gtk::EntryBuffer::default();
         let compose_buf = gtk::EntryBuffer::default();
         let toaster = Toaster::default();
         let ui = AppUi::new(
@@ -227,6 +242,7 @@ impl SimpleComponent for AppModel {
             &username_buf,
             &password_buf,
             &room_filter_buf,
+            &message_filter_buf,
             &compose_buf,
             space_factory.widget(),
             room_factory.widget(),
@@ -256,6 +272,8 @@ impl SimpleComponent for AppModel {
             loading_rooms: false,
             active_room: None,
             messages: HashMap::new(),
+            message_filter_buf,
+            message_search_empty: false,
             loading_older: None,
             loading_messages: false,
             message_vadj: None,
@@ -402,6 +420,32 @@ impl SimpleComponent for AppModel {
             }
 
             AppMsg::Back => self.screen = Screen::Rooms,
+            AppMsg::MessageFilterChanged => self.sync_messages(),
+            AppMsg::OpenMessageInTimeline(event_id) => {
+                // Ordinary timeline rows keep their existing interactions
+                // (selecting text and opening links). Only a filtered result
+                // acts as a jump target.
+                if !self.message_filter_buf.text().trim().is_empty() {
+                    // Clearing the buffer emits `MessageFilterChanged`, which
+                    // rebuilds the full factory. Queue highlighting behind
+                    // that message rather than addressing a result row that
+                    // the rebuild is about to destroy.
+                    self.message_filter_buf.set_text("");
+                    _sender.input(AppMsg::HighlightMessage(event_id));
+                }
+            }
+            AppMsg::HighlightMessage(event_id) => {
+                if let Some(index) = self.timeline_row_index(&event_id) {
+                    self.message_factory.send(index, MessageRowInput::Highlight);
+                }
+            }
+            AppMsg::RevealMessage(y) => {
+                if let Some(vadj) = &self.message_vadj {
+                    let centered = y - (vadj.page_size() / 2.0);
+                    let max_scroll = (vadj.upper() - vadj.page_size()).max(vadj.lower());
+                    vadj.set_value(centered.clamp(vadj.lower(), max_scroll));
+                }
+            }
             AppMsg::Send => {
                 let text = self.compose_buf.text().trim().to_owned();
                 if !text.is_empty() {
@@ -475,6 +519,7 @@ impl AppModel {
             &self.ui.password_entry,
             &self.ui.compose_entry,
             &self.ui.room_filter,
+            &self.ui.message_filter,
         ] {
             entry.set_icon_from_icon_name(
                 gtk::EntryIconPosition::Secondary,
@@ -498,6 +543,12 @@ impl AppModel {
         {
             let sender = sender.clone();
             self.ui.room_filter.connect_changed(move |_| sender.input(AppMsg::FilterChanged));
+        }
+        {
+            let sender = sender.clone();
+            self.ui
+                .message_filter
+                .connect_changed(move |_| sender.input(AppMsg::MessageFilterChanged));
         }
         {
             let sender = sender.clone();
@@ -559,6 +610,9 @@ impl AppModel {
         self.ui
             .message_stack
             .set_visible_child_name(if self.loading_messages { "loading" } else { "messages" });
+        self.ui
+            .message_search_empty
+            .set_visible(!self.loading_messages && self.message_search_empty);
         self.ui.older_messages_spinner.set_visible(
             self.loading_older.as_deref() == self.active_room.as_deref(),
         );
@@ -742,6 +796,7 @@ impl AppModel {
     fn open_room(&mut self, id: String) {
         self.loading_older = None;
         self.restore_scroll_anchor.set(None);
+        self.message_filter_buf.set_text("");
         self.active_room = Some(id.clone());
         self.screen = Screen::Room;
         let has_cache = self.messages.get(&id).is_some_and(|m| !m.is_empty());
@@ -800,9 +855,28 @@ impl AppModel {
     fn sync_messages(&mut self) {
         let mut guard = self.message_factory.guard();
         guard.clear();
+        self.message_search_empty = false;
         let Some(room_id) = self.active_room.clone() else { return };
+        let needle = self.message_filter_buf.text().trim().to_lowercase();
+        let messages: Vec<ChatMessage> = self
+            .messages
+            .get(&room_id)
+            .into_iter()
+            .flatten()
+            .filter(|message| {
+                needle.is_empty()
+                    || message.body.to_lowercase().contains(&needle)
+                    || message.sender.to_lowercase().contains(&needle)
+                    || message
+                        .display_name
+                        .as_deref()
+                        .is_some_and(|name| name.to_lowercase().contains(&needle))
+            })
+            .cloned()
+            .collect();
+        self.message_search_empty = !needle.is_empty() && messages.is_empty();
         let mut last_day = None;
-        for msg in self.messages.get(&room_id).cloned().unwrap_or_default() {
+        for msg in messages {
             let day = local_day(msg.ts_millis);
             if day.is_some() && day != last_day {
                 last_day = day;
@@ -810,6 +884,24 @@ impl AppModel {
             }
             guard.push_back(TimelineRow::Message(msg));
         }
+    }
+
+    fn timeline_row_index(&self, event_id: &str) -> Option<usize> {
+        let room_id = self.active_room.as_ref()?;
+        let mut row_index = 0;
+        let mut last_day = None;
+        for message in self.messages.get(room_id)? {
+            let day = local_day(message.ts_millis);
+            if day.is_some() && day != last_day {
+                row_index += 1;
+                last_day = day;
+            }
+            if message.event_id.as_deref() == Some(event_id) {
+                return Some(row_index);
+            }
+            row_index += 1;
+        }
+        None
     }
 
     fn reset_session(&mut self) {
@@ -821,6 +913,8 @@ impl AppModel {
         self.loading_rooms = false;
         self.active_room = None;
         self.messages.clear();
+        self.message_filter_buf.set_text("");
+        self.message_search_empty = false;
         self.loading_older = None;
         self.restore_scroll_anchor.set(None);
         self.loading_messages = false;

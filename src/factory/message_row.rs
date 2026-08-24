@@ -24,20 +24,42 @@ pub struct MessageRow {
     pub item: TimelineRow,
 }
 
+#[derive(Debug)]
+pub enum MessageRowInput {
+    Highlight,
+}
+
+#[derive(Debug)]
+pub enum MessageRowOutput {
+    OpenInTimeline(String),
+    RevealPosition(f64),
+}
+
 #[relm4::factory(pub)]
 impl FactoryComponent for MessageRow {
     type Init = TimelineRow;
-    type Input = ();
-    type Output = ();
+    type Input = MessageRowInput;
+    type Output = MessageRowOutput;
     type CommandOutput = ();
     type ParentWidget = gtk::Box;
 
     view! {
         #[root]
+        #[name(root)]
         gtk::Box {
             set_orientation: gtk::Orientation::Vertical,
             set_spacing: 2,
             set_halign: self.halign(),
+            set_focusable: !self.is_separator(),
+
+            add_controller = gtk::GestureClick {
+                set_button: gtk::gdk::BUTTON_PRIMARY,
+                connect_released[sender, event_id = self.event_id()] => move |_, _, _, _| {
+                    if let Some(event_id) = event_id.clone() {
+                        let _ = sender.output(MessageRowOutput::OpenInTimeline(event_id));
+                    }
+                },
+            },
 
             gtk::Box {
                 set_visible: self.is_separator(),
@@ -133,6 +155,42 @@ impl FactoryComponent for MessageRow {
     fn init_model(item: Self::Init, _index: &relm4::factory::DynamicIndex, _sender: FactorySender<Self>) -> Self {
         Self { item }
     }
+
+    fn update_with_view(
+        &mut self,
+        widgets: &mut Self::Widgets,
+        message: Self::Input,
+        sender: FactorySender<Self>,
+    ) {
+        match message {
+            MessageRowInput::Highlight => {
+                // Factory rows have been recreated immediately before this
+                // input arrives. Wait until GTK has parented and allocated the
+                // new row before focusing it; focusing the just-removed search
+                // result caused `gtk_widget_is_ancestor` criticals and could
+                // leave the scroller at the wrong position.
+                let root = widgets.root.downgrade();
+                glib::idle_add_local_once(move || {
+                    let Some(root) = root.upgrade() else { return };
+                    root.add_css_class("card");
+                    root.grab_focus();
+                    // Focusing a nested box does not reliably ask
+                    // GtkScrolledWindow to reveal it. Report the allocated
+                    // position to the app so it can move the adjustment
+                    // explicitly.
+                    let _ = sender.output(MessageRowOutput::RevealPosition(
+                        f64::from(root.allocation().y()),
+                    ));
+                    let root = root.downgrade();
+                    glib::timeout_add_seconds_local_once(2, move || {
+                        if let Some(root) = root.upgrade() {
+                            root.remove_css_class("card");
+                        }
+                    });
+                });
+            }
+        }
+    }
 }
 
 impl MessageRow {
@@ -168,6 +226,10 @@ impl MessageRow {
 
     fn body(&self) -> &str {
         self.message().map(|m| m.body.as_str()).unwrap_or_default()
+    }
+
+    fn event_id(&self) -> Option<String> {
+        self.message()?.event_id.clone()
     }
 
     /// The message body as Pango markup, with any `http(s)://` URLs turned

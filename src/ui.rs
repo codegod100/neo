@@ -44,7 +44,9 @@ pub struct AppUi {
     pub room_back: gtk::Button,
     pub room_name: gtk::Label,
     pub room_address: gtk::Label,
+    pub message_filter: gtk::Entry,
     pub message_stack: gtk::Stack,
+    pub message_search_empty: gtk::Label,
     pub message_scroller: gtk::ScrolledWindow,
     pub jump_to_present: gtk::Button,
     pub older_messages_spinner: gtk::Spinner,
@@ -64,6 +66,7 @@ impl AppUi {
         username_buf: &gtk::EntryBuffer,
         password_buf: &gtk::EntryBuffer,
         room_filter_buf: &gtk::EntryBuffer,
+        message_filter_buf: &gtk::EntryBuffer,
         compose_buf: &gtk::EntryBuffer,
         space_widget: &gtk::Box,
         room_widget: &gtk::ListBox,
@@ -76,11 +79,13 @@ impl AppUi {
         let username_entry: gtk::Entry = object(&builder, "username_entry");
         let password_entry: gtk::Entry = object(&builder, "password_entry");
         let room_filter: gtk::Entry = object(&builder, "room_filter");
+        let message_filter: gtk::Entry = object(&builder, "message_filter");
         let compose_entry: gtk::Entry = object(&builder, "compose_entry");
         homeserver_entry.set_buffer(homeserver_buf);
         username_entry.set_buffer(username_buf);
         password_entry.set_buffer(password_buf);
         room_filter.set_buffer(room_filter_buf);
+        message_filter.set_buffer(message_filter_buf);
         compose_entry.set_buffer(compose_buf);
 
         let space_mount: gtk::Box = object(&builder, "space_mount");
@@ -137,7 +142,9 @@ impl AppUi {
             room_back: object(&builder, "room_back"),
             room_name: object(&builder, "room_name"),
             room_address: object(&builder, "room_address"),
+            message_filter,
             message_stack: object(&builder, "message_stack"),
+            message_search_empty: object(&builder, "message_search_empty"),
             message_scroller: object(&builder, "message_scroller"),
             jump_to_present: object(&builder, "jump_to_present"),
             older_messages_spinner: object(&builder, "older_messages_spinner"),
