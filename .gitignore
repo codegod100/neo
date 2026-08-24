@@ -25,3 +25,6 @@
 /.env
 /.envrc
 /.buckconfig.local
+
+# Delta's local worktree/clone store. Never commit.
+/.delta/

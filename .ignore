@@ -1,0 +1,6 @@
+# Tool/editor ignore. Does not change git tracking.
+# Stops Delta from snapshotting these into the worktree CRDT.
+/.delta/
+/third-party/
+/target/
+/buck-out/
