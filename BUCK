@@ -3,6 +3,8 @@
 # desktop-only, no Android/JNI entrypoint to build).
 #
 #  - `buck2 run //:neo` - the desktop binary, replacing `cargo run`.
+#  - `buck2 run //:apk` - build the Android APK with Pixiewood.
+#  - `buck2 run //:deploy-apk` - build and install it on an attached device.
 #
 # Depends on third-party/BUCK, the reindeer-buckified crate graph
 # reindeer.toml describes - one dependency edge, `:relm4`, pulls in the
@@ -32,7 +34,7 @@ GTK4_LIB_DIRS = [
     "-L/nix/store/0y9x1nyg7wzdj3illkajsyh6ajrxbw3s-gdk-pixbuf-2.44.7/lib",
 ]
 
-ARELM_ROOT = read_root_config("neo", "arelm_root", "../arelm")
+ARELM_ROOT = read_root_config("neo", "arelm_root", "arelm")
 
 ANDROID_AARCH64_LIB_DIRS = [
     "-L" + ARELM_ROOT + "/.pixiewood/bin-aarch64/subprojects/gtk/gtk",
@@ -65,8 +67,11 @@ ANDROID_X86_64_LIB_DIRS = [
 ]
 
 PLATFORM_LIB_DIRS = select({
-    "//platforms:is-android-aarch64": ANDROID_AARCH64_LIB_DIRS,
-    "//platforms:is-android-x86_64": ANDROID_X86_64_LIB_DIRS,
+    # Android GTK libraries are built and packaged by Pixiewood after this
+    # cdylib is produced. ELF shared libraries permit those symbols to remain
+    # unresolved until the Android loader loads the packaged GTK libraries.
+    "//platforms:is-android-aarch64": [],
+    "//platforms:is-android-x86_64": [],
     "DEFAULT": GTK4_LIB_DIRS,
 })
 
@@ -111,6 +116,46 @@ genrule(
     srcs = ["src/ui/app.blp"],
     out = "app.ui",
     cmd = "blueprint-compiler compile --output $OUT $SRCS",
+)
+
+configured_alias(
+    name = "neo-android-aarch64",
+    actual = ":neo-lib",
+    platform = "//platforms:android-aarch64",
+)
+
+configured_alias(
+    name = "neo-android-x86_64",
+    actual = ":neo-lib",
+    platform = "//platforms:android-x86_64",
+)
+
+genrule(
+    name = "apk",
+    srcs = [
+        "build-scripts/build-android.py",
+        "data/icons/neo-foreground.xml",
+        "data/org.neo.Neo.metainfo.xml",
+        "meson.build",
+        "meson_options.txt",
+        "pixiewood.xml",
+    ],
+    out = "neo.apk",
+    cmd = """
+mkdir -p prebuilt/aarch64 prebuilt/x86_64
+cp $(location :neo-android-aarch64[cdylib]) prebuilt/aarch64/libneo.so
+cp $(location :neo-android-x86_64[cdylib]) prebuilt/x86_64/libneo.so
+python3 build-scripts/build-android.py \
+  --output "$OUT"
+""",
+    visibility = ["PUBLIC"],
+)
+
+sh_binary(
+    name = "deploy-apk",
+    main = "build-scripts/deploy-apk.sh",
+    resources = [":apk"],
+    visibility = ["PUBLIC"],
 )
 
 rust_library(

@@ -58,22 +58,34 @@ buck2 run //:neo
 
 ## Android APK
 
-Neo uses the reusable Arelm/Pixiewood support checkout next to this repository.
+Neo pins the reusable Arelm/Pixiewood support checkout as the `arelm` submodule.
 The Android build compiles `//:neo-lib[cdylib]`, whose exported C entrypoint is
 loaded by GTK's Android runtime. Neo continues to own its package ID, metadata,
 icon, UI, and application logic.
 
-With Arelm checked out at `../arelm`, the Android SDK selected, and Pixiewood's
+With submodules initialized, the Android SDK installed, and Pixiewood's
 prerequisites installed:
 
 ```sh
-python3 build-scripts/build-android.py --android-home "$ANDROID_HOME"
+buck2 run //:apk
 ```
+
+Build and install the APK on the attached Android device with:
+
+```sh
+buck2 run //:deploy-apk
+```
+
+The SDK is discovered through `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `adb` on
+`PATH`, or the standard `~/Android/Sdk` location. Use
+`-- --android-home /path/to/sdk` to select another installation.
+Pixiewood and its Perl runtime are pinned in the RBE image; no local
+installation is needed to build the APK.
 
 The generated APKs are written beneath
 `.pixiewood/android/app/build/outputs/apk/`. The Meson `arelm_root` option
-defaults to `../arelm` and can be overridden by build-system integrations that
-place the support checkout elsewhere.
+defaults to the pinned `arelm` submodule and can be overridden by build-system
+integrations that place the support checkout elsewhere.
 
 Use the wrapper rather than invoking Pixiewood's three commands directly:
 Pixiewood currently has no manifest option for Android permissions, so the

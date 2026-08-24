@@ -64,7 +64,7 @@ def _buildbuddy_execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
             allow_cache_uploads = True,
             remote_execution_properties = {
                 "OSFamily": "Linux",
-                "container-image": "docker://ghcr.io/codegod100/neo-rbe@sha256:1ac882109e2329bb53333bf4f93326ff2d1695c18a0f6fb7270496e11a3f1ae2",
+                "container-image": ctx.attrs.container_image,
             },
             remote_execution_use_case = "buck2-default",
             remote_output_paths = "output_paths",
@@ -86,6 +86,7 @@ buildbuddy_execution_platform = rule(
     impl = _buildbuddy_execution_platform_impl,
     attrs = {
         "cpu_configuration": attrs.dep(providers = [ConfigurationInfo]),
+        "container_image": attrs.string(),
         "os_configuration": attrs.dep(providers = [ConfigurationInfo]),
         "use_windows_path_separators": attrs.bool(),
     },

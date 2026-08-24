@@ -1,6 +1,13 @@
 option(
   'arelm_root',
   type: 'string',
-  value: '../arelm',
+  value: 'arelm',
   description: 'Path to the reusable Arelm support checkout',
+)
+
+option(
+  'prebuilt_lib_root',
+  type: 'string',
+  value: 'prebuilt',
+  description: 'Directory containing Buck-built Android cdylibs by ABI',
 )

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,16 +14,95 @@ def run(*args: str) -> None:
     subprocess.run(args, check=True)
 
 
+def pixiewood_command(explicit: str | None, root: Path) -> Path:
+    candidates = [
+        explicit,
+        os.environ.get("PIXIEWOOD"),
+        shutil.which("pixiewood"),
+        str(root.parent / "gtk-android-builder/pixiewood"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        command = Path(candidate).expanduser().resolve()
+        if command.is_file() and os.access(command, os.X_OK):
+            return command
+
+    raise SystemExit(
+        "error: Pixiewood not found. Ensure tools/pixiewood is executable, "
+        "set PIXIEWOOD, or pass --pixiewood /path/to/pixiewood"
+    )
+
+
+def android_home(explicit: str | None) -> Path:
+    candidates = [
+        explicit,
+        os.environ.get("ANDROID_HOME"),
+        os.environ.get("ANDROID_SDK_ROOT"),
+    ]
+    adb = shutil.which("adb")
+    if adb:
+        candidates.append(str(Path(adb).resolve().parent.parent))
+    candidates.append(str(Path.home() / "Android/Sdk"))
+    candidates.append("/opt/android-sdk")
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        sdk = Path(candidate).expanduser().resolve()
+        if (sdk / "platform-tools/adb").is_file():
+            return sdk
+
+    raise SystemExit(
+        "error: Android SDK not found. Set ANDROID_HOME or ANDROID_SDK_ROOT, "
+        "put adb on PATH, or pass --android-home /path/to/sdk"
+    )
+
+
+def built_apk(root: Path) -> Path:
+    output_dir = root / ".pixiewood/android/app/build/outputs/apk"
+    preferred = output_dir / "debug/app-debug.apk"
+    if preferred.is_file():
+        return preferred
+
+    apks = sorted(output_dir.glob("**/*.apk"))
+    if len(apks) != 1:
+        found = ", ".join(str(path) for path in apks) or "none"
+        raise RuntimeError(
+            f"expected one APK beneath {output_dir}, found: {found}"
+        )
+    return apks[0]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--android-home",
-        required=True,
-        help="Android SDK root passed to `pixiewood prepare`",
+        help="Android SDK root (otherwise discovered from the environment)",
+    )
+    parser.add_argument(
+        "--pixiewood",
+        help="path to Pixiewood (otherwise discovered from the environment)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="copy the generated APK to this Buck output path",
+    )
+    parser.add_argument(
+        "--deploy",
+        action="store_true",
+        help="install the built APK on the attached Android device",
     )
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parent.parent
+    root = Path.cwd()
+    if not (root / "pixiewood.xml").is_file():
+        raise SystemExit(
+            "error: run this command from the Neo repository root"
+        )
+    sdk = android_home(args.android_home)
+    pixiewood = pixiewood_command(args.pixiewood, root)
     manifest = root / ".pixiewood/android/app/src/main/AndroidManifest.xml"
     activity = root / (
         ".pixiewood/android/app/src/main/java/"
@@ -31,8 +112,8 @@ def main() -> None:
         ".pixiewood/android/app/src/main/java/org/gtk/android/ImContext.java"
     )
 
-    run("pixiewood", "prepare", "-s", args.android_home, "pixiewood.xml")
-    run("pixiewood", "generate")
+    run(str(pixiewood), "prepare", "-s", str(sdk), "pixiewood.xml")
+    run(str(pixiewood), "generate")
 
     text = manifest.read_text()
     internet = (
@@ -169,7 +250,15 @@ def main() -> None:
             raise RuntimeError("Pixiewood key-down handler layout changed")
         activity.write_text(activity_java.replace(key_down, repeat_delete, 1))
 
-    run("pixiewood", "build")
+    run(str(pixiewood), "build")
+    apk = built_apk(root)
+    print(f"APK: {apk}")
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(apk, args.output)
+    if args.deploy:
+        adb = sdk / "platform-tools/adb"
+        run(str(adb), "install", "-r", str(apk))
 
 
 if __name__ == "__main__":

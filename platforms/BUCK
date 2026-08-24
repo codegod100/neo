@@ -49,6 +49,7 @@ cache_execution_platform(
 buildbuddy_execution_platform(
     name = "remote",
     cpu_configuration = host_configuration.cpu,
+    container_image = "docker://ghcr.io/codegod100/neo-rbe@sha256:de02374ac0e8e7105a1abad21bd403e4db758fe2d2da9d1513705fb20775dc9c",
     os_configuration = host_configuration.os,
     use_windows_path_separators = host_info().os.is_windows,
     visibility = ["PUBLIC"],

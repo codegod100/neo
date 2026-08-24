@@ -71,23 +71,23 @@ android_hack_alias(
 system_cxx_toolchain(
     name = "cxx",
     archiver = select({
-        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
-        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
+        "root//platforms:is-android-aarch64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
+        "root//platforms:is-android-x86_64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar",
         "DEFAULT": "/bin/ar",
     }),
     compiler = select({
-        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang",
-        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang",
+        "root//platforms:is-android-aarch64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang",
+        "root//platforms:is-android-x86_64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang",
         "DEFAULT": "/bin/clang",
     }),
     cxx_compiler = select({
-        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
-        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
+        "root//platforms:is-android-aarch64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
+        "root//platforms:is-android-x86_64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
         "DEFAULT": "/bin/clang++",
     }),
     linker = select({
-        "root//platforms:is-android-aarch64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
-        "root//platforms:is-android-x86_64": "/home/linuxbrew/.linuxbrew/share/android-commandlinetools/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
+        "root//platforms:is-android-aarch64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++",
+        "root//platforms:is-android-x86_64": "/opt/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android31-clang++",
         "DEFAULT": "/bin/clang++",
     }),
     visibility = ["PUBLIC"],

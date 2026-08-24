@@ -1,0 +1,3 @@
+[submodule "arelm"]
+	path = arelm
+	url = https://github.com/codegod100/arelm.git

@@ -30,26 +30,39 @@ if meson.is_cross_build()
 endif
 
 profile = get_option('buildtype') == 'release' ? 'release' : 'dev'
-arelm_wrapper = find_program(
-  get_option('arelm_root') / 'build-scripts' / 'buck2-build-cdylib.sh',
-)
+prebuilt_lib_root = get_option('prebuilt_lib_root')
+prebuilt_lib = prebuilt_lib_root / cpu_family / 'libneo.so'
 
-custom_target(
-  'neo',
-  output: 'libneo.so',
-  console: true,
-  build_always_stale: true,
-  depends: build_deps,
-  command: [
-    arelm_wrapper,
-    '--out', '@OUTPUT@',
-    '--project-root', meson.project_source_root(),
-    '--target', '//:neo-lib[cdylib]',
-    '--target-platform', target_platform,
-    '--rust-target', rust_target,
-    '--profile', profile,
-  ],
-  install: true,
-  install_dir: get_option('libdir'),
-  install_tag: 'runtime',
-)
+if meson.is_cross_build() and import('fs').is_file(prebuilt_lib)
+  custom_target(
+    'neo',
+    output: 'libneo.so',
+    command: ['cp', prebuilt_lib, '@OUTPUT@'],
+    install: true,
+    install_dir: get_option('libdir'),
+    install_tag: 'runtime',
+  )
+else
+  arelm_wrapper = find_program(
+    get_option('arelm_root') / 'build-scripts' / 'buck2-build-cdylib.sh',
+  )
+  custom_target(
+    'neo',
+    output: 'libneo.so',
+    console: true,
+    build_always_stale: true,
+    depends: build_deps,
+    command: [
+      arelm_wrapper,
+      '--out', '@OUTPUT@',
+      '--project-root', meson.project_source_root(),
+      '--target', '//:neo-lib[cdylib]',
+      '--target-platform', target_platform,
+      '--rust-target', rust_target,
+      '--profile', profile,
+    ],
+    install: true,
+    install_dir: get_option('libdir'),
+    install_tag: 'runtime',
+  )
+endif
