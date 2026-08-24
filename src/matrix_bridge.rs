@@ -356,8 +356,27 @@ async fn run(mut cmd_rx: mpsc::UnboundedReceiver<MatrixCmd>, evt_tx: mpsc::Unbou
                                 if let Some(timeline) = active_sync.active_timeline.clone() {
                                     let evt_tx = evt_tx.clone();
                                     tokio::spawn(async move {
-                                        if let Err(e) = timeline.paginate_backwards(40).await {
-                                            let _ = evt_tx.send(MatrixEvent::Error(format!("paginate: {e}")));
+                                        match timeline.paginate_backwards(40).await {
+                                            Ok(_) => {
+                                                // `paginate_backwards` updates the Timeline before
+                                                // returning, but its separate diff-stream task may
+                                                // still be flattening the update for the UI. Send a
+                                                // snapshot from this task so OlderLoaded cannot
+                                                // overtake the content it says has finished loading.
+                                                let (items, _) = timeline.subscribe().await;
+                                                let client = timeline.room().client();
+                                                let messages =
+                                                    flatten_chat_messages(&items, &client).await;
+                                                let _ = evt_tx.send(MatrixEvent::Timeline {
+                                                    room_id: room_id.clone(),
+                                                    messages,
+                                                });
+                                            }
+                                            Err(e) => {
+                                                let _ = evt_tx.send(MatrixEvent::Error(format!(
+                                                    "paginate: {e}"
+                                                )));
+                                            }
                                         }
                                         let _ = evt_tx.send(MatrixEvent::OlderLoaded { room_id });
                                     });
