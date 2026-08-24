@@ -329,12 +329,23 @@ Box app_content {
             }
             StackPage {
               name: "messages";
-              child: ScrolledWindow message_scroller {
-                hscrollbar-policy: never;
-                vscrollbar-policy: automatic;
-                child: Box message_mount {
-                  orientation: vertical;
-                };
+              child: Box {
+                orientation: vertical;
+                spacing: 8;
+                ScrolledWindow message_scroller {
+                  vexpand: true;
+                  hscrollbar-policy: never;
+                  vscrollbar-policy: automatic;
+                  child: Box message_mount {
+                    orientation: vertical;
+                  };
+                }
+                Button jump_to_present {
+                  label: "↓  Jump to present";
+                  halign: center;
+                  visible: false;
+                  styles ["pill"]
+                }
               };
             }
           }

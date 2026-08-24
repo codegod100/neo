@@ -153,6 +153,7 @@ pub enum AppMsg {
     // Room screen
     Back,
     Send,
+    JumpToPresent,
     /// Auto-triggered by the message scroller nearing the top of the loaded
     /// history — see the `connect_value_changed` handler wired up in `init`.
     LoadOlder,
@@ -297,9 +298,12 @@ impl SimpleComponent for AppModel {
 
         {
             let sticky_bottom = sticky_bottom.clone();
+            let jump_to_present = model.ui.jump_to_present.clone();
             let sender = sender.clone();
             vadj.connect_value_changed(move |adj| {
-                sticky_bottom.set(adj.value() + adj.page_size() >= adj.upper() - 1.0);
+                let at_bottom = adj.value() + adj.page_size() >= adj.upper() - 1.0;
+                sticky_bottom.set(at_bottom);
+                jump_to_present.set_visible(!at_bottom);
                 if adj.value() <= LOAD_OLDER_THRESHOLD {
                     sender.input(AppMsg::LoadOlder);
                 }
@@ -407,6 +411,11 @@ impl SimpleComponent for AppModel {
                     self.compose_buf.set_text("");
                 }
             }
+            AppMsg::JumpToPresent => {
+                if let Some(vadj) = &self.message_vadj {
+                    vadj.set_value(vadj.upper() - vadj.page_size());
+                }
+            }
             AppMsg::LoadOlder => {
                 // Guards against the scroller re-firing this on every
                 // intermediate scroll event while still near the top and a
@@ -456,6 +465,7 @@ impl AppModel {
         clicked!(self.ui.lobby_back, AppMsg::Back);
         clicked!(self.ui.room_back, AppMsg::Back);
         clicked!(self.ui.send_button, AppMsg::Send);
+        clicked!(self.ui.jump_to_present, AppMsg::JumpToPresent);
         clicked!(self.ui.settings_back, AppMsg::Back);
         clicked!(self.ui.logout_button, AppMsg::Logout);
 
