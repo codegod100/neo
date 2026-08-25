@@ -8,6 +8,8 @@
 [buildscript.run]
 rustc_link_lib = true
 rustc_link_search = true
+[buildscript.run.env]
+PKG_CONFIG_PATH = "/lib/pkgconfig:/share/pkgconfig"
 ['cfg(all(target_os = "android", target_arch = "aarch64"))'.buildscript.run.env]
 DOCS_RS = "1"
 

@@ -1911,6 +1911,7 @@ buildscript_run(
     package_name = "cairo-sys-rs",
     buildscript_rule = ":cairo-sys-rs-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libcairo",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",
@@ -5304,6 +5305,7 @@ buildscript_run(
     package_name = "gdk-pixbuf-sys",
     buildscript_rule = ":gdk-pixbuf-sys-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libgdk_pixbuf-2.0",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",
@@ -5489,6 +5491,7 @@ buildscript_run(
     package_name = "gdk4-sys",
     buildscript_rule = ":gdk4-sys-0.11-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings of GDK 4",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/gtk4-rs",
@@ -5993,6 +5996,7 @@ buildscript_run(
     package_name = "gio-sys",
     buildscript_rule = ":gio-sys-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libgio-2.0",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",
@@ -6249,6 +6253,7 @@ buildscript_run(
     package_name = "glib-sys",
     buildscript_rule = ":glib-sys-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libglib-2.0",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",
@@ -6390,6 +6395,7 @@ buildscript_run(
     package_name = "gobject-sys",
     buildscript_rule = ":gobject-sys-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libgobject-2.0",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",
@@ -6541,6 +6547,7 @@ buildscript_run(
     package_name = "graphene-sys",
     buildscript_rule = ":graphene-sys-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libgraphene-1.0",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",
@@ -6755,6 +6762,7 @@ buildscript_run(
     package_name = "gsk4-sys",
     buildscript_rule = ":gsk4-sys-0.11-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings of GSK 4",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/gtk4-rs",
@@ -7001,6 +7009,7 @@ buildscript_run(
     package_name = "gtk4-sys",
     buildscript_rule = ":gtk4-sys-0.11-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_MANIFEST_LINKS": "gtk-4",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings of GTK 4",
@@ -9366,6 +9375,7 @@ buildscript_run(
     package_name = "libadwaita-sys",
     buildscript_rule = ":libadwaita-sys-0.9-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "Bilal Elmoussaoui <bil.elmoussaoui@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "FFI bindings for libadwaita",
         "CARGO_PKG_HOMEPAGE": "https://world.pages.gitlab.gnome.org/Rust/libadwaita-rs/",
@@ -11619,6 +11629,7 @@ buildscript_run(
     package_name = "pango-sys",
     buildscript_rule = ":pango-sys-0.22-build-script-build",
     env = {
+        "PKG_CONFIG_PATH": "/lib/pkgconfig:/share/pkgconfig",
         "CARGO_PKG_AUTHORS": "The gtk-rs Project Developers",
         "CARGO_PKG_DESCRIPTION": "FFI bindings to libpango-1.0",
         "CARGO_PKG_HOMEPAGE": "https://gtk-rs.org/",

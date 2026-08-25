@@ -176,6 +176,7 @@
               "ANDROID_SDK_ROOT=/opt/android-sdk"
               "GI_TYPELIB_PATH=/lib/girepository-1.0"
               "PATH=/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin"
+              "PKG_CONFIG_PATH=/lib/pkgconfig:/share/pkgconfig"
             ];
           };
         };
