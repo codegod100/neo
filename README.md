@@ -3,6 +3,9 @@
 A [matrix.org](https://matrix.org) chat client built with
 [Relm4](https://relm4.org) (GTK4 + libadwaita), following a GNOME HIG look.
 
+A Flutter version built with [flatkit](https://github.com/codegod100/flutterkit)
+lives in [`flutter/`](flutter/README.md).
+
 ## Stack
 
 - [`relm4`](https://relm4.org) 0.11 — Elm-architecture GUI framework on top of `gtk4-rs`
