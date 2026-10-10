@@ -1,6 +1,7 @@
 # Everything neo's Flutter build needs besides Flutter itself (conda-forge
-# has no Flutter package): flatkit, the C/C++ toolchain and GTK for the
-# Linux runner, Rust for vodozemac (end-to-end encryption), and sqlite.
+# has no Flutter package) and flatkit (a git dependency in pubspec.yaml):
+# the C/C++ toolchain and GTK for the Linux runner, Rust for vodozemac
+# (end-to-end encryption), and sqlite.
 #
 #   pixi install
 #   pixi run linux        # flutter run -d linux inside the environment
@@ -8,10 +9,8 @@
 name = "neo"
 channels = ["conda-forge"]
 platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
-preview = ["pixi-build"]
 
 [dependencies]
-flatkit = { git = "https://github.com/codegod100/flutterkit", branch = "main" }
 rust = "*"
 
 # The Linux runner: C/C++ toolchain, GTK 3 and what its pkg-config files

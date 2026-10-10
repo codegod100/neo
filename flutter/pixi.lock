@@ -172,7 +172,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.98.1-h2c6d0dc_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-64-2.28-h4ee821c_9.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-      - conda_source: flatkit[c86fb143] @ git+https://github.com/codegod100/flutterkit?branch=main#23c0618fd6ad0630bd81a180dda0c7c654feacb2
       linux-aarch64:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/at-spi2-atk-2.38.0-h1f2db35_3.tar.bz2
@@ -314,19 +313,15 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-aarch64-unknown-linux-gnu-1.98.1-hbe8e118_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-aarch64-2.28-h585391f_9.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-      - conda_source: flatkit[c86fb143] @ git+https://github.com/codegod100/flutterkit?branch=main#23c0618fd6ad0630bd81a180dda0c7c654feacb2
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.98.1-h38e4360_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/rust-1.98.1-h5655b98_2.conda
-      - conda_source: flatkit[c86fb143] @ git+https://github.com/codegod100/flutterkit?branch=main#23c0618fd6ad0630bd81a180dda0c7c654feacb2
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.98.1-hf6ec828_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/rust-1.98.1-h4ff7c5d_2.conda
-      - conda_source: flatkit[c86fb143] @ git+https://github.com/codegod100/flutterkit?branch=main#23c0618fd6ad0630bd81a180dda0c7c654feacb2
       win-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.98.1-h17fc481_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/rust-1.98.1-hf8d6059_2.conda
-      - conda_source: flatkit[c86fb143] @ git+https://github.com/codegod100/flutterkit?branch=main#23c0618fd6ad0630bd81a180dda0c7c654feacb2
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -4318,10 +4313,3 @@ packages:
   run_exports: {}
   size: 191550554
   timestamp: 1788889704375
-- conda_source: flatkit[c86fb143] @ git+https://github.com/codegod100/flutterkit?branch=main#23c0618fd6ad0630bd81a180dda0c7c654feacb2
-  version: 0.1.0
-  build: h4616a5c_0
-  subdir: noarch
-  noarch: generic
-  variants:
-    target_platform: noarch
