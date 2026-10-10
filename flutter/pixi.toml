@@ -42,7 +42,8 @@ PATH = "$PIXI_PROJECT_ROOT/tool/bin:$PATH"
 
 [tasks]
 get = "flutter pub get"
-linux = { cmd = "flutter run -d linux", depends-on = ["get"] }
-build-linux = { cmd = "flutter build linux --release", depends-on = ["get"] }
+clean-stale-cmake = "tool/clean-stale-cmake"
+linux = { cmd = "flutter run -d linux", depends-on = ["get", "clean-stale-cmake"] }
+build-linux = { cmd = "flutter build linux --release", depends-on = ["get", "clean-stale-cmake"] }
 run-release = { cmd = "./build/linux/x64/release/bundle/neo", depends-on = ["build-linux"] }
 test = { cmd = "flutter test", depends-on = ["get"] }

@@ -47,6 +47,11 @@ built app through pixi (`pixi run run-release`, or `pixi shell` first):
 it links the environment's GTK, and the environment sets `LD_LIBRARY_PATH`
 so the system's font libraries don't get mixed in.
 
+`pixi run linux` and `pixi run build-linux` first remove any Linux build
+directory that CMake set up outside pixi (for example by an earlier plain
+`flutter run`): CMake keeps the compiler and GTK it found first, and mixing
+the system's with pixi's fails to link.
+
 For Android, macOS, Windows or iOS, `flutter run` works as usual with that
 platform's own toolchain.
 

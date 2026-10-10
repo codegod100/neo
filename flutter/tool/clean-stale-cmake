@@ -1,0 +1,14 @@
+#!/bin/sh
+# Removes Linux build directories that CMake configured outside the pixi
+# environment. CMake caches the compiler and GTK paths it first found, so a
+# build directory made by a plain `flutter run` keeps using the system's
+# clang and GTK even inside pixi, and linking them with pixi's toolchain
+# fails with hundreds of undefined references.
+for cache in build/linux/*/*/CMakeCache.txt; do
+  [ -f "$cache" ] || continue
+  if ! grep -q "^CMAKE_CXX_COMPILER:.*$CONDA_PREFIX" "$cache"; then
+    dir=$(dirname "$cache")
+    echo "Removing $dir: it was configured outside the pixi environment."
+    rm -rf "$dir"
+  fi
+done
