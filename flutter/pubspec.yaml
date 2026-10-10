@@ -40,10 +40,9 @@ dependencies:
   path_provider: ^2.1.6
   url_launcher: ^6.3.3
   path: ^1.9.1
+  # Installed by `pixi install` (see pixi.toml).
   flatkit:
-    git:
-      url: https://github.com/codegod100/flutterkit
-      ref: main
+    path: .pixi/envs/default/share/flatkit
 
 dev_dependencies:
   flutter_test:

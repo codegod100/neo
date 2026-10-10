@@ -148,11 +148,9 @@ packages:
   flatkit:
     dependency: "direct main"
     description:
-      path: "."
-      ref: main
-      resolved-ref: "23c0618fd6ad0630bd81a180dda0c7c654feacb2"
-      url: "https://github.com/codegod100/flutterkit"
-    source: git
+      path: ".pixi/envs/default/share/flatkit"
+      relative: true
+    source: path
     version: "0.1.0"
   flutter:
     dependency: "direct main"

@@ -22,23 +22,33 @@ settings open beside it; on a narrow one (phones) they replace each other.
 
 ## Running
 
+Everything the build needs except Flutter itself comes from
+[pixi](https://pixi.sh) (`pixi.toml`): flatkit, clang, CMake, Ninja,
+pkg-config, GTK 3, sqlite, and Rust for
+[`flutter_vodozemac`](https://pub.dev/packages/flutter_vodozemac) (end-to-end
+encryption). conda-forge has no Flutter package, so install Flutter
+separately and have `flutter` on your `PATH`.
+
 ```sh
 cd flutter
-flutter pub get
-flutter run -d linux     # or macos, windows, android, ios
+pixi install          # also puts flatkit at .pixi/envs/default/share/flatkit
+pixi run linux        # flutter run -d linux
 ```
 
-End-to-end encryption comes from
-[`flutter_vodozemac`](https://pub.dev/packages/flutter_vodozemac), which
-compiles Rust during the build, so a Rust toolchain (`rustup`) is needed.
-On Linux, Flutter also needs the GTK 3 development headers
-(`libgtk-3-dev`).
+`pixi update flatkit` picks up new flatkit commits. Other tasks:
+`pixi run build-linux`, `pixi run run-release` and `pixi run test`. Run the
+built app through pixi (`pixi run run-release`, or `pixi shell` first):
+it links the environment's GTK, and the environment sets `LD_LIBRARY_PATH`
+so the system's font libraries don't get mixed in.
+
+For Android, macOS, Windows or iOS, run `pixi install` once for flatkit and
+then `flutter run` as usual with that platform's own toolchain.
 
 ## Tests
 
 ```sh
-flutter analyze
-flutter test
+pixi run flutter analyze
+pixi run test
 ```
 
 ## How it fits together

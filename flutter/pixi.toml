@@ -1,0 +1,44 @@
+# Everything neo's Flutter build needs besides Flutter itself (conda-forge
+# has no Flutter package): flatkit, the C/C++ toolchain and GTK for the
+# Linux runner, Rust for vodozemac (end-to-end encryption), and sqlite.
+#
+#   pixi install
+#   pixi run linux        # flutter run -d linux inside the environment
+[workspace]
+name = "neo"
+channels = ["conda-forge"]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
+preview = ["pixi-build"]
+
+[dependencies]
+flatkit = { git = "https://github.com/codegod100/flutterkit", branch = "main" }
+rust = "*"
+
+# The Linux runner: C/C++ toolchain, GTK 3 and what its pkg-config files
+# require. Other platforms build with their own SDKs (Xcode, Visual Studio,
+# Android Studio).
+[target.linux.dependencies]
+clang = "*"
+clangxx = "*"
+lld = "*"
+cmake = "*"
+ninja = "*"
+pkg-config = "*"
+gtk3 = "*"
+glib = "*"
+zlib = "*"
+expat = "*"
+sqlite = "*"
+
+# The app links GTK from this environment, but Flutter's engine library
+# only searches next to itself, so without this it picks up the system's
+# fontconfig and the two clash at startup.
+[target.linux.activation.env]
+LD_LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+[tasks]
+get = "flutter pub get"
+linux = { cmd = "flutter run -d linux", depends-on = ["get"] }
+build-linux = { cmd = "flutter build linux --release", depends-on = ["get"] }
+run-release = { cmd = "./build/linux/x64/release/bundle/neo", depends-on = ["build-linux"] }
+test = { cmd = "flutter test", depends-on = ["get"] }

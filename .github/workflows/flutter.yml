@@ -18,6 +18,10 @@ jobs:
         with:
           channel: stable
           cache: true
-      - run: flutter pub get
-      - run: flutter analyze
-      - run: flutter test
+      - uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          manifest-path: flutter/pixi.toml
+      - run: pixi run get
+      - run: pixi run flutter analyze
+      - run: pixi run test
+      - run: pixi run build-linux
