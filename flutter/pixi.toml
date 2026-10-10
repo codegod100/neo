@@ -35,6 +35,11 @@ sqlite = "*"
 [target.linux.activation.env]
 LD_LIBRARY_PATH = "$CONDA_PREFIX/lib"
 
+# flutter_vodozemac's build calls rustup, which conda-forge doesn't package;
+# tool/bin/rustup stands in for it using this environment's Rust.
+[activation.env]
+PATH = "$PIXI_PROJECT_ROOT/tool/bin:$PATH"
+
 [tasks]
 get = "flutter pub get"
 linux = { cmd = "flutter run -d linux", depends-on = ["get"] }

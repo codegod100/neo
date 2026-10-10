@@ -1,0 +1,42 @@
+#!/bin/sh
+# A stand-in for rustup inside the pixi environment.
+#
+# flutter_vodozemac builds its Rust code through cargokit, which drives the
+# build with rustup (`rustup toolchain list`, `rustup run <toolchain> cargo
+# build ...`). pixi's Rust has no rustup, so this answers those calls with
+# the one toolchain the environment has and runs cargo directly.
+set -e
+
+host=$(rustc -vV | sed -n 's/^host: //p')
+
+case "$1" in
+  toolchain)
+    case "$2" in
+      list) echo "stable-$host (default)" ;;
+      install) ;; # the environment's toolchain is the only one
+      *) echo "rustup shim: unsupported: $*" >&2; exit 1 ;;
+    esac
+    ;;
+  target)
+    case "$2" in
+      list) echo "$host" ;;
+      add)
+        for arg in "$@"; do last=$arg; done
+        if [ "$last" != "$host" ]; then
+          echo "rustup shim: pixi's Rust only builds for $host, not $last" >&2
+          exit 1
+        fi
+        ;;
+      *) echo "rustup shim: unsupported: $*" >&2; exit 1 ;;
+    esac
+    ;;
+  component) ;; # rust-src etc. only matter for nightly builds
+  run)
+    shift 2 # drop "run" and the toolchain name
+    exec "$@"
+    ;;
+  *)
+    echo "rustup shim: unsupported: $*" >&2
+    exit 1
+    ;;
+esac

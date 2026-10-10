@@ -29,6 +29,11 @@ pkg-config, GTK 3, sqlite, and Rust for
 encryption). conda-forge has no Flutter package, so install Flutter
 separately and have `flutter` on your `PATH`.
 
+conda-forge has no rustup either, which the encryption library's build
+(cargokit) insists on, so `tool/bin/rustup` stands in for it inside the
+environment: it reports pixi's Rust as the installed toolchain and runs
+`cargo` directly.
+
 ```sh
 cd flutter
 pixi install
