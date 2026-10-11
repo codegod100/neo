@@ -42,10 +42,10 @@ pixi run linux        # flutter run -d linux
 
 flatkit is a git dependency in `pubspec.yaml`; `flutter pub upgrade flatkit`
 picks up new commits. Other tasks:
-`pixi run build-linux`, `pixi run run-release` and `pixi run test`. Run the
-built app through pixi (`pixi run run-release`, or `pixi shell` first):
-it links the environment's GTK, and the environment sets `LD_LIBRARY_PATH`
-so the system's font libraries don't get mixed in.
+`pixi run build-linux` and `pixi run test`. The environment's GTK is only
+used to build: the install step rewrites the bundle's library search path
+(with patchelf), so `build/linux/x64/release/bundle/neo` runs on the system's
+GTK, fonts and GPU drivers, inside or outside pixi.
 
 `pixi run linux` and `pixi run build-linux` first remove any Linux build
 directory that CMake set up outside pixi (for example by an earlier plain

@@ -126,3 +126,21 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Inside the pixi environment its clang adds the environment's lib directory
+# to every binary's RPATH, so the app would load the environment's GTK,
+# fontconfig and OpenGL loader instead of the system's, and those clash with
+# the system GPU drivers and fonts at startup. Point the bundle back at
+# itself only, so it runs on the system libraries like any other GTK app.
+find_program(PATCHELF patchelf)
+if(PATCHELF AND DEFINED ENV{CONDA_PREFIX})
+  install(CODE "
+    file(GLOB _neo_libs \"${INSTALL_BUNDLE_LIB_DIR}/*.so\")
+    execute_process(COMMAND \"${PATCHELF}\" --set-rpath \"\$ORIGIN/lib\"
+      \"${CMAKE_INSTALL_PREFIX}/${BINARY_NAME}\" COMMAND_ERROR_IS_FATAL ANY)
+    foreach(_lib \${_neo_libs})
+      execute_process(COMMAND \"${PATCHELF}\" --set-rpath \"\$ORIGIN\" \"\${_lib}\"
+        COMMAND_ERROR_IS_FATAL ANY)
+    endforeach()
+  " COMPONENT Runtime)
+endif()

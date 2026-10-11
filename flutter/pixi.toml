@@ -28,12 +28,8 @@ glib = "*"
 zlib = "*"
 expat = "*"
 sqlite = "*"
-
-# The app links GTK from this environment, but Flutter's engine library
-# only searches next to itself, so without this it picks up the system's
-# fontconfig and the two clash at startup.
-[target.linux.activation.env]
-LD_LIBRARY_PATH = "$CONDA_PREFIX/lib"
+# Rewrites the built bundle's library search path; see linux/CMakeLists.txt.
+patchelf = "*"
 
 # flutter_vodozemac's build calls rustup, which conda-forge doesn't package;
 # tool/bin/rustup stands in for it using this environment's Rust.
@@ -45,5 +41,4 @@ get = "flutter pub get"
 clean-stale-cmake = "tool/clean-stale-cmake"
 linux = { cmd = "flutter run -d linux", depends-on = ["get", "clean-stale-cmake"] }
 build-linux = { cmd = "flutter build linux --release", depends-on = ["get", "clean-stale-cmake"] }
-run-release = { cmd = "./build/linux/x64/release/bundle/neo", depends-on = ["build-linux"] }
 test = { cmd = "flutter test", depends-on = ["get"] }

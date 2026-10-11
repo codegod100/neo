@@ -124,6 +124,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ninja-1.13.2-h171cf75_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.5-h781a0a9_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pango-1.58.2-h7bb47b9_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/patchelf-0.19.2-hee9eb32_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pcre2-10.47-h8b3dc9c_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pixman-0.46.4-h54a6638_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pkg-config-0.29.2-h1114479_1013.conda
@@ -265,6 +266,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ninja-1.13.2-hdc560ac_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/openssl-3.6.5-he6ad1d5_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/pango-1.58.2-h03cb6a0_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/patchelf-0.19.2-hfb11796_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/pcre2-10.47-he574923_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/pixman-0.46.4-h7ac5ae9_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/pkg-config-0.29.2-hfbd14cd_1013.conda
@@ -1755,6 +1757,18 @@ packages:
     - pango >=1.58.2,<2.0a0
   size: 471814
   timestamp: 1788490377724
+- conda: https://conda.anaconda.org/conda-forge/linux-64/patchelf-0.19.2-hee9eb32_0.conda
+  sha256: 74ba13a7cd793cae441317d1963f824b1c45f49adde34f9801b3c766986592c5
+  md5: 0fd1c32796736ad1b43e1445cad9a2fb
+  depends:
+  - libstdcxx >=15
+  - libgcc >=15
+  - __glibc >=2.17,<3.0.a0
+  license: GPL-3.0-or-later
+  license_family: GPL
+  run_exports: {}
+  size: 152126
+  timestamp: 1790866799280
 - conda: https://conda.anaconda.org/conda-forge/linux-64/pcre2-10.47-h8b3dc9c_1.conda
   sha256: 9ebb10a4eb3be51ae67d85c679f5a7a50cb040ed25c783e6331a225ea09991d4
   md5: 06f6113cf1ff4a54b65f87ead132a5f1
@@ -3566,6 +3580,17 @@ packages:
     - pango >=1.58.2,<2.0a0
   size: 481881
   timestamp: 1788492815886
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/patchelf-0.19.2-hfb11796_0.conda
+  sha256: bb6287b0ef4d29bd7fe98edb18da0aced7a99ddfb633a521b9ea1e74074f9823
+  md5: fce27ad49d151dbf5b8f2d3daf606d79
+  depends:
+  - libstdcxx >=15
+  - libgcc >=15
+  license: GPL-3.0-or-later
+  license_family: GPL
+  run_exports: {}
+  size: 155583
+  timestamp: 1790866789930
 - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/pcre2-10.47-he574923_1.conda
   sha256: 16e5bee11686028d60a495004f99a10c613ada44cc27e330bee18a1b67fb184c
   md5: c98763518d0a4c9895e515190afb7dec
